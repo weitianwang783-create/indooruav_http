@@ -85,40 +85,55 @@ delete_rule_if_present() {
 
 WLAN_CIDR="$(require_ipv4_cidr "$WLAN_IFACE")"
 ETH_CIDR="$(require_ipv4_cidr "$ETH_IFACE")"
-WLAN_IP="${WLAN_CIDR%/*}"
 ETH_IP="${ETH_CIDR%/*}"
-WLAN_NET="$(network_from_cidr "$WLAN_CIDR")"
 ETH_NET="$(network_from_cidr "$ETH_CIDR")"
-WLAN_GW="$(ip route show default dev "$WLAN_IFACE" | awk '/default/ {print $3; exit}')"
+WLAN_IP=""
+WLAN_NET=""
+WLAN_GW=""
+WLAN_ONLINE="0"
+
+if [[ -n "$WLAN_CIDR" ]]; then
+  WLAN_IP="${WLAN_CIDR%/*}"
+  WLAN_NET="$(network_from_cidr "$WLAN_CIDR")"
+  WLAN_GW="$(ip route show default dev "$WLAN_IFACE" | awk '/default/ {print $3; exit}')"
+  if [[ -n "$WLAN_GW" ]]; then
+    WLAN_ONLINE="1"
+  fi
+fi
 
 if [[ -z "$RADAR_IP" ]]; then
   RADAR_IP="$(ip neigh show dev "$ETH_IFACE" | awk 'NR==1 {print $1}')"
 fi
 
-if [[ -z "$WLAN_CIDR" || -z "$ETH_CIDR" ]]; then
-  echo "Failed to detect IPv4 addresses on $WLAN_IFACE or $ETH_IFACE." >&2
+if [[ -z "$ETH_CIDR" ]]; then
+  echo "Failed to detect an IPv4 address on $ETH_IFACE." >&2
   exit 1
 fi
 
-if [[ -z "$WLAN_GW" ]]; then
-  echo "Failed to detect a default gateway on $WLAN_IFACE." >&2
-  exit 1
-fi
-
-echo "Wi-Fi : $WLAN_IFACE $WLAN_CIDR gateway $WLAN_GW"
 echo "Wired : $ETH_IFACE $ETH_CIDR"
-echo "Nets  : $WLAN_IFACE $WLAN_NET, $ETH_IFACE $ETH_NET"
+if [[ "$WLAN_ONLINE" == "1" ]]; then
+  echo "Wi-Fi : $WLAN_IFACE $WLAN_CIDR gateway $WLAN_GW"
+  echo "Nets  : $WLAN_IFACE $WLAN_NET, $ETH_IFACE $ETH_NET"
+elif [[ -n "$WLAN_CIDR" ]]; then
+  echo "Wi-Fi : $WLAN_IFACE $WLAN_CIDR (no default gateway, radar-only mode)"
+  echo "Nets  : $WLAN_IFACE $WLAN_NET, $ETH_IFACE $ETH_NET"
+else
+  echo "Wi-Fi : $WLAN_IFACE not configured, radar-only mode"
+  echo "Nets  : $ETH_IFACE $ETH_NET"
+fi
 if [[ -n "$RADAR_IP" ]]; then
   echo "Radar : $RADAR_IP"
 else
   echo "Radar : not detected, only generic policy routing will be configured"
 fi
 
-# Keep the main table biased toward Wi-Fi for the shared LAN subnet.
-# Delete kernel auto-routes first (metric 0) so they don't win.
-ip route del "$WLAN_NET" dev "$WLAN_IFACE" proto kernel 2>/dev/null || true
+# Keep the main table biased toward Wi-Fi when it is online, otherwise keep
+# the wired radar link self-contained so the sensor stays reachable offline.
+if [[ "$WLAN_ONLINE" == "1" ]]; then
+  ip route del "$WLAN_NET" dev "$WLAN_IFACE" proto kernel 2>/dev/null || true
+  ip route replace "$WLAN_NET" dev "$WLAN_IFACE" scope link src "$WLAN_IP" metric "$WLAN_METRIC"
+fi
 ip route del "$ETH_NET" dev "$ETH_IFACE" proto kernel 2>/dev/null || true
-ip route replace "$WLAN_NET" dev "$WLAN_IFACE" scope link src "$WLAN_IP" metric "$WLAN_METRIC"
 ip route replace "$ETH_NET" dev "$ETH_IFACE" scope link src "$ETH_IP" metric "$ETH_METRIC"
 if [[ -n "$RADAR_IP" ]]; then
   ip route replace "${RADAR_IP}/32" dev "$ETH_IFACE" scope link src "$ETH_IP" metric 50
@@ -126,8 +141,12 @@ fi
 
 # Rebuild policy routing tables.
 ip route flush table "$WLAN_TABLE"
-ip route add "$WLAN_NET" dev "$WLAN_IFACE" scope link src "$WLAN_IP" table "$WLAN_TABLE"
-ip route add default via "$WLAN_GW" dev "$WLAN_IFACE" table "$WLAN_TABLE"
+if [[ -n "$WLAN_CIDR" ]]; then
+  ip route add "$WLAN_NET" dev "$WLAN_IFACE" scope link src "$WLAN_IP" table "$WLAN_TABLE"
+fi
+if [[ "$WLAN_ONLINE" == "1" ]]; then
+  ip route add default via "$WLAN_GW" dev "$WLAN_IFACE" table "$WLAN_TABLE"
+fi
 
 ip route flush table "$ETH_TABLE"
 ip route add "$ETH_NET" dev "$ETH_IFACE" scope link src "$ETH_IP" table "$ETH_TABLE"
@@ -137,7 +156,9 @@ fi
 
 delete_rule_if_present "$WLAN_RULE_PREF"
 delete_rule_if_present "$ETH_RULE_PREF"
-ip rule add pref "$WLAN_RULE_PREF" from "${WLAN_IP}/32" table "$WLAN_TABLE"
+if [[ -n "$WLAN_CIDR" ]]; then
+  ip rule add pref "$WLAN_RULE_PREF" from "${WLAN_IP}/32" table "$WLAN_TABLE"
+fi
 ip rule add pref "$ETH_RULE_PREF" from "${ETH_IP}/32" table "$ETH_TABLE"
 
 # Reduce ARP/rp_filter surprises when both NICs sit in the same subnet.
