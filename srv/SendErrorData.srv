@@ -1,0 +1,4 @@
+int32 error_type
+string error_info
+---
+int32 result_code

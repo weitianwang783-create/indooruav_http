@@ -1,0 +1,16 @@
+build/
+devel/
+logs/
+.catkin_tools/
+
+*.o
+*.so
+*.a
+*.out
+
+__pycache__/
+*.pyc
+*.pyo
+
+.DS_Store
+Thumbs.db

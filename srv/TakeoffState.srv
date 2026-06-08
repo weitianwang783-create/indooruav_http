@@ -1,0 +1,3 @@
+int32 takeoff_state
+---
+int32 result_code

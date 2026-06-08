@@ -1,0 +1,4 @@
+# Parameters for indooruav_http_server (private namespace)
+local_port: 20000
+# command_service_wait_timeout_sec: 1.0
+# command_mode_1_service: indooruav_core/state_machine_event/takeoff_command

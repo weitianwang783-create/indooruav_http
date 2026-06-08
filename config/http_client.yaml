@@ -1,0 +1,13 @@
+# Parameters for indooruav_http_client (private namespace)
+server_ip: "127.0.0.1"
+server_port: 8080
+site_id: 11
+device_id: 1
+device_state_interval: 30.0
+flight_state_interval: 3.0
+flight_state_sample_rate: 1
+takeoff_state_interval: 3.0
+uav_online_timeout_sec: 5.0
+odom_topic: "/Odometry_rotate"
+odom_fallback_topic: "/Odometry"
+post_land_image_root_dir: "/tmp/indooruav_post_land_images"

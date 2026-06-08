@@ -1,0 +1,4 @@
+bool trigger
+---
+int32 result_code
+string result_json
