@@ -550,8 +550,13 @@ indooruav_controller:
 - `post_land_image_source_mode` 配置错了
 - `drone_sd_card` 模式下没有配置 `media_camera_mount_position`
 
-11111
+## 9. 真机 SD 卡取图测试步骤
 
+### 9.1 终端 1：启动本机假前端
+
+因为你现在没有真前端，可以先在本机起一个假前端：
+
+```bash
 mkdir -p /tmp/fake_frontend_imgs
 
 python3 - <<'PY'
@@ -601,6 +606,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         print(f"[GET] {parsed.path}?{parsed.query}", flush=True)
+        if parsed.path == "/airlineSync":
+            return self.reply(200, {"resultCode": 1, "result": []})
         return self.reply()
 
     def log_message(self, fmt, *args):
@@ -609,16 +616,43 @@ class Handler(BaseHTTPRequestHandler):
 print("fake frontend listening on 0.0.0.0:8080", flush=True)
 HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
 PY
+```
 
+### 9.2 终端 2：启动 ROS 环境和节点
 
+先启动 `indooruav_controller`：
 
+```bash
 source /opt/ros/noetic/setup.bash
 source ~/Project/IndoorUavInspection2/catkin_ws/devel/setup.bash
 
+roslaunch ~/Project/IndoorUavInspection2/catkin_ws/src/indooruav_controller/launch/bringup_controller_hardware.launch
+```
+
+再另开一个终端，启动 `indooruav_http`，不用启动 `core`：
+
+```bash
+source /opt/ros/noetic/setup.bash
+source ~/Project/IndoorUavInspection2/catkin_ws/devel/setup.bash
+
+roslaunch ~/Project/IndoorUavInspection2/catkin_ws/src/indooruav_http/launch/bringup_indooruav_http.launch start_core:=false
+```
+
+如果你的 `rospack` 环境已经正常，也可以用包名启动：
+
+```bash
+roslaunch indooruav_controller bringup_controller_hardware.launch
+roslaunch indooruav_http bringup_indooruav_http.launch start_core:=false
+```
+
+### 9.3 终端 3：先记录任务时间，再写入 `/airlineInfo`
+
+```bash
+source /opt/ros/noetic/setup.bash
+source ~/Project/IndoorUavInspection2/catkin_ws/devel/setup.bash
 
 export DETECT=$(date +%Y%m%d%H%M%S)
 echo $DETECT
-
 
 python3 - <<PY
 import os, urllib.request
@@ -626,14 +660,58 @@ detect = os.environ["DETECT"]
 url = f"http://127.0.0.1:20000/airlineInfo?siteId=11&deviceId=1&airlineKey=AAAA&detectTimeCur={detect}"
 print(urllib.request.urlopen(url).read().decode())
 PY
+```
 
+### 9.4 在地面直接拍 1 到 2 张照片，写进无人机 SD 卡
+
+```bash
 rosservice call /indooruav_controller/controller_hardware/camera_mode_photo
 rosservice call /indooruav_controller/controller_hardware/camera_photo_shoot
 sleep 3
 rosservice call /indooruav_controller/controller_hardware/camera_photo_shoot
 sleep 5
+```
 
+### 9.5 直接触发“降落后回传工作流”，不用发 `land_complete`
 
+```bash
+rosservice call /indooruav_http/run_post_land_workflow
+```
+
+### 9.6 查看结果
+
+```bash
+find /tmp/fake_frontend_imgs -type f | sort
+```
+
+### 9.7 成功时你应该看到什么
+
+假前端终端里如果成功，会出现：
+
+```text
+[GET] /sendFlyOver?...
+[sendPic] saved: /tmp/fake_frontend_imgs/1/YYYY/MM/DD/<detectTimeCur>/1.jpg
+[sendPic] saved: /tmp/fake_frontend_imgs/1/YYYY/MM/DD/<detectTimeCur>/2.jpg
+[GET] /sendPicOver?...
+```
+
+这就说明：
+
+- `1.9` 调到了
+- SD 卡图片取出来并上传了
+- `1.11` 也调到了
+
+### 9.8 如果你想先单独测“SD 卡取图”
+
+可以直接调 `controller`，不走整个 `http` 工作流：
+
+```bash
 rosservice call /indooruav_controller/controller_hardware/upload_mission_photos_from_sd "{airline_key: 'AAAA', detect_time_cur: '$DETECT'}"
+```
 
-rosservice call /indooruav_controller/controller_hardware/upload_mission_photos_from_sd "{airline_key: 'AAAA', detect_time_cur: '20260609153000'}"
+重点看返回里的：
+
+- `matched_count`
+- `uploaded_count`
+- `failed_count`
+
