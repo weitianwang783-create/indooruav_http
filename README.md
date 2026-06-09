@@ -44,7 +44,7 @@ roslaunch indooruav_http bringup_indooruav_http.launch
 
 可选参数：
 ```bash
-roslaunch indooruav_http bringup_indooruav_http.launch start_core:=false
+roslaunch indooruav_http bringup_indooruav_http.launch start_core:=false/  
 roslaunch indooruav_http bringup_indooruav_http.launch \
   server_config:=/path/to/http_server.yaml \
   client_config:=/path/to/http_client.yaml
@@ -126,7 +126,10 @@ roslaunch indooruav_http bringup_indooruav_http.launch
 ```text
 http://127.0.0.1:20000/airlineInfo?siteId=11&deviceId=1&airlineKey=AAAA&detectTimeCur=20250701125959
 http://127.0.0.1:20000/sendCommand?siteId=11&deviceId=1&commandMode=1
-```
+py3命令如下，没装curl请用这个命令起飞
+cd catkin_ws
+source devel/setup.bash
+python3 -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:20000/sendCommand?siteId=11&deviceId=1&commandMode=1').read().decode())"
 
 ### 4.2 本地假前端测试图片上传
 这套测试适合验证：
@@ -311,3 +314,9 @@ find /tmp/fake_frontend_imgs -type f | sort
 - `/indooruav_http/send_pic` 返回 3：先确认已经通过 `/airlineInfo` 下发了 `airlineKey` 和 `detectTimeCur`。
 - `find /tmp/fake_frontend_imgs -type f` 没有结果：先看假前端终端是否收到 `/sendPic`，再确认 `http_client.yaml` 是否指向 `127.0.0.1:8080`。
 - WSL 提示 `localhost 代理未镜像`：这条提示通常可以忽略，不影响这里基于 `127.0.0.1` 的本地测试。
+
+
+
+7.注意
+传图路径没有写死，写在client.yaml   post_land_image_root_dir: 
+联调时 ip和端口用前端的
