@@ -289,6 +289,25 @@ indooruav_controller:
 
 ### 6.1 终端 1：启动假前端服务器
 
+如果你是在自己的电脑上测试，最简单的方式是直接运行仓库里的脚本：
+
+Linux / WSL：
+
+```bash
+python3 /home/wwt/catkin_ws/src/indooruav_http/scripts/fake_frontend_server.py \
+  --host 0.0.0.0 \
+  --port 8080 \
+  --save-root /tmp/fake_frontend_imgs
+```
+
+Windows PowerShell：
+
+```powershell
+py "\\wsl.localhost\Ubuntu-20.04\home\wwt\catkin_ws\src\indooruav_http\scripts\fake_frontend_server.py" --host 0.0.0.0 --port 8080 --save-root D:\fake_frontend_imgs
+```
+
+如果你还是想临时用一段内联 Python，也可以继续用下面这段：
+
 ```bash
 mkdir -p /tmp/fake_frontend_imgs
 
@@ -531,3 +550,90 @@ indooruav_controller:
 - `post_land_image_source_mode` 配置错了
 - `drone_sd_card` 模式下没有配置 `media_camera_mount_position`
 
+11111
+
+mkdir -p /tmp/fake_frontend_imgs
+
+python3 - <<'PY'
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import cgi, json, os, urllib.parse
+
+SAVE_ROOT = "/tmp/fake_frontend_imgs"
+os.makedirs(SAVE_ROOT, exist_ok=True)
+
+class Handler(BaseHTTPRequestHandler):
+    def reply(self, code=200, obj=None):
+        if obj is None:
+            obj = {"resultCode": 1}
+        body = json.dumps(obj).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        if parsed.path == "/sendPic":
+            form = cgi.FieldStorage(
+                fp=self.rfile,
+                headers=self.headers,
+                environ={
+                    "REQUEST_METHOD": "POST",
+                    "CONTENT_TYPE": self.headers.get("Content-Type", ""),
+                    "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
+                },
+            )
+            file_item = form["file"]
+            device_id = qs.get("deviceId", ["unknown"])[0]
+            detect_time = qs.get("detectTimeCur", ["unknown"])[0]
+            year, month, day = detect_time[0:4], detect_time[4:6], detect_time[6:8]
+            out_dir = os.path.join(SAVE_ROOT, device_id, year, month, day, detect_time)
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, os.path.basename(file_item.filename))
+            with open(out_path, "wb") as f:
+                f.write(file_item.file.read())
+            print(f"[sendPic] saved: {out_path}", flush=True)
+            return self.reply()
+        return self.reply()
+
+    def do_GET(self):
+        parsed = urllib.parse.urlparse(self.path)
+        print(f"[GET] {parsed.path}?{parsed.query}", flush=True)
+        return self.reply()
+
+    def log_message(self, fmt, *args):
+        pass
+
+print("fake frontend listening on 0.0.0.0:8080", flush=True)
+HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+PY
+
+
+
+source /opt/ros/noetic/setup.bash
+source ~/Project/IndoorUavInspection2/catkin_ws/devel/setup.bash
+
+
+export DETECT=$(date +%Y%m%d%H%M%S)
+echo $DETECT
+
+
+python3 - <<PY
+import os, urllib.request
+detect = os.environ["DETECT"]
+url = f"http://127.0.0.1:20000/airlineInfo?siteId=11&deviceId=1&airlineKey=AAAA&detectTimeCur={detect}"
+print(urllib.request.urlopen(url).read().decode())
+PY
+
+rosservice call /indooruav_controller/controller_hardware/camera_mode_photo
+rosservice call /indooruav_controller/controller_hardware/camera_photo_shoot
+sleep 3
+rosservice call /indooruav_controller/controller_hardware/camera_photo_shoot
+sleep 5
+
+
+rosservice call /indooruav_controller/controller_hardware/upload_mission_photos_from_sd "{airline_key: 'AAAA', detect_time_cur: '$DETECT'}"
+
+rosservice call /indooruav_controller/controller_hardware/upload_mission_photos_from_sd "{airline_key: 'AAAA', detect_time_cur: '20260609153000'}"
