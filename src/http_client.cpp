@@ -19,6 +19,7 @@ namespace indooruav_http {
 namespace {
 const char* kJsonContentType = "application/json";
 const char* kRunPostLandWorkflowService = "/indooruav_http/run_post_land_workflow";
+const char* kUploadImageBytesService = "/indooruav_http/upload_image_bytes";
 std::mutex g_upload_sequence_mutex;
 std::unordered_map<std::string, int> g_next_upload_sequence_by_detect_time;
 
@@ -90,6 +91,12 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
     nh_private.param<std::string>("post_land_image_root_dir",
                                   post_land_image_root_dir_,
                                   "/tmp/indooruav_post_land_images");
+    nh_private.param<std::string>("post_land_image_source_mode",
+                                  post_land_image_source_mode_,
+                                  "local_fs");
+    nh_private.param<std::string>("controller_upload_mission_media_service",
+                                  controller_upload_mission_media_service_,
+                                  "/indooruav_controller/controller_hardware/upload_mission_photos_from_sd");
 
     nh_private.param<int>("uav_state", current_device_state_.uav_state, 1);
     nh_private.param<int>("control_state", current_device_state_.control_state, 1);
@@ -105,6 +112,8 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
 
     SetupSubscribers(nh);
     SetupServices(nh);
+    transfer_mission_media_client_ =
+        nh.serviceClient<indooruav_msgs::TransferMissionMedia>(controller_upload_mission_media_service_);
 }
 
 HttpClient::~HttpClient() {
@@ -151,6 +160,10 @@ void HttpClient::SetupServices(ros::NodeHandle& nh) {
     send_pic_service_ = nh.advertiseService(
         "/indooruav_http/send_pic",
         &HttpClient::HandleSendPic,
+        this);
+    upload_image_bytes_service_ = nh.advertiseService(
+        kUploadImageBytesService,
+        &HttpClient::HandleUploadImageBytes,
         this);
     set_takeoff_state_service_ = nh.advertiseService(
         "/indooruav_http/set_takeoff_state",
@@ -429,6 +442,41 @@ HttpResult HttpClient::SendPic(const std::string& image_path) {
     return SendPicWithMission(image_path, airline_key, detect_time_cur);
 }
 
+HttpResult HttpClient::SendPicBytesWithMission(const std::string& image_extension,
+                                               const std::vector<uint8_t>& image_bytes,
+                                               const std::string& airline_key,
+                                               const std::string& detect_time_cur) {
+    if (image_bytes.empty()) {
+        HttpResult result;
+        result.result_code = 3;
+        return result;
+    }
+
+    if (airline_key.empty() || detect_time_cur.empty()) {
+        ROS_WARN("sendPic skipped because airlineKey or detectTimeCur from /airlineInfo is missing");
+        HttpResult result;
+        result.result_code = 3;
+        return result;
+    }
+
+    const std::string extension = NormalizeImageExtension(image_extension);
+    const std::string mime_type = GetImageMimeTypeByExtension(extension);
+    const int upload_sequence = NextUploadSequenceForDetectTime(detect_time_cur);
+    const std::string upload_filename = std::to_string(upload_sequence) + extension;
+    const std::string file_bytes(reinterpret_cast<const char*>(image_bytes.data()), image_bytes.size());
+
+    std::string path = "/sendPic?siteId=" + std::to_string(site_id_) +
+                       "&deviceId=" + std::to_string(device_id_) +
+                       "&airlineKey=" + airline_key +
+                       "&detectTimeCur=" + detect_time_cur;
+
+    httplib::UploadFormDataItems items;
+    items.push_back({"file", file_bytes, upload_filename, mime_type});
+
+    std::lock_guard<std::mutex> lock(http_mutex_);
+    return ParseResult(client_->Post(path.c_str(), items));
+}
+
 HttpResult HttpClient::SendPicWithMission(const std::string& image_path,
                                           const std::string& airline_key,
                                           const std::string& detect_time_cur) {
@@ -453,21 +501,8 @@ HttpResult HttpClient::SendPicWithMission(const std::string& image_path,
         return result;
     }
 
-    const std::string extension = GetImageExtension(image_path);
-    const std::string mime_type = GetImageMimeType(image_path);
-    const int upload_sequence = NextUploadSequenceForDetectTime(detect_time_cur);
-    const std::string upload_filename = std::to_string(upload_sequence) + extension;
-
-    std::string path = "/sendPic?siteId=" + std::to_string(site_id_) +
-                       "&deviceId=" + std::to_string(device_id_) +
-                       "&airlineKey=" + airline_key +
-                       "&detectTimeCur=" + detect_time_cur;
-
-    httplib::UploadFormDataItems items;
-    items.push_back({"file", file_bytes, upload_filename, mime_type});
-
-    std::lock_guard<std::mutex> lock(http_mutex_);
-    return ParseResult(client_->Post(path.c_str(), items));
+    std::vector<uint8_t> bytes(file_bytes.begin(), file_bytes.end());
+    return SendPicBytesWithMission(GetImageExtension(image_path), bytes, airline_key, detect_time_cur);
 }
 
 HttpResult HttpClient::SendDeviceState(const DeviceState& device_state) {
@@ -681,11 +716,23 @@ std::string HttpClient::GetImageExtension(const std::string& image_path) const {
     if (dot_pos == std::string::npos || (slash_pos != std::string::npos && dot_pos < slash_pos)) {
         return ".bin";
     }
-    return ToLowerCopy(image_path.substr(dot_pos));
+    return NormalizeImageExtension(image_path.substr(dot_pos));
 }
 
-std::string HttpClient::GetImageMimeType(const std::string& image_path) const {
-    const std::string extension = GetImageExtension(image_path);
+std::string HttpClient::NormalizeImageExtension(const std::string& image_extension) const {
+    if (image_extension.empty()) {
+        return ".bin";
+    }
+
+    std::string normalized = ToLowerCopy(image_extension);
+    if (!normalized.empty() && normalized.front() != '.') {
+        normalized = "." + normalized;
+    }
+    return normalized;
+}
+
+std::string HttpClient::GetImageMimeTypeByExtension(const std::string& image_extension) const {
+    const std::string extension = NormalizeImageExtension(image_extension);
     if (extension == ".jpg" || extension == ".jpeg") {
         return "image/jpeg";
     }
@@ -698,15 +745,29 @@ std::string HttpClient::GetImageMimeType(const std::string& image_path) const {
     if (extension == ".webp") {
         return "image/webp";
     }
+    if (extension == ".dng") {
+        return "image/x-adobe-dng";
+    }
+    if (extension == ".tif" || extension == ".tiff") {
+        return "image/tiff";
+    }
     return "application/octet-stream";
 }
 
+std::string HttpClient::GetImageMimeType(const std::string& image_path) const {
+    return GetImageMimeTypeByExtension(GetImageExtension(image_path));
+}
+
 bool HttpClient::IsSupportedImageExtension(const std::string& extension) const {
-    return extension == ".jpg" ||
-           extension == ".jpeg" ||
-           extension == ".png" ||
-           extension == ".bmp" ||
-           extension == ".webp";
+    const std::string normalized = NormalizeImageExtension(extension);
+    return normalized == ".jpg" ||
+           normalized == ".jpeg" ||
+           normalized == ".png" ||
+           normalized == ".bmp" ||
+           normalized == ".webp" ||
+           normalized == ".dng" ||
+           normalized == ".tif" ||
+           normalized == ".tiff";
 }
 
 std::vector<std::string> HttpClient::CollectPostLandImages(const std::string& detect_time_cur) const {
@@ -755,6 +816,27 @@ std::vector<std::string> HttpClient::CollectPostLandImages(const std::string& de
     return image_paths;
 }
 
+indooruav_msgs::TransferMissionMedia::Response HttpClient::TransferMissionMediaFromController(
+    const std::string& airline_key,
+    const std::string& detect_time_cur) {
+    indooruav_msgs::TransferMissionMedia service;
+    service.request.airline_key = airline_key;
+    service.request.detect_time_cur = detect_time_cur;
+
+    if (!transfer_mission_media_client_.call(service)) {
+        indooruav_msgs::TransferMissionMedia::Response fallback;
+        fallback.result_code = 2;
+        fallback.matched_count = 0;
+        fallback.uploaded_count = 0;
+        fallback.failed_count = 0;
+        ROS_WARN("Post-land workflow failed to call controller media transfer service [%s]",
+                 controller_upload_mission_media_service_.c_str());
+        return fallback;
+    }
+
+    return service.response;
+}
+
 void HttpClient::StartPostLandWorkflow() {
     if (post_land_workflow_thread_.joinable()) {
         post_land_workflow_thread_.join();
@@ -783,8 +865,9 @@ void HttpClient::RunPostLandWorkflow() {
         return;
     }
 
-    ROS_INFO("Post-land workflow started: detectTimeCur=%s, image_root=%s",
+    ROS_INFO("Post-land workflow started: detectTimeCur=%s, image_source_mode=%s, image_root=%s",
              detect_time_cur.c_str(),
+             post_land_image_source_mode_.c_str(),
              post_land_image_root_dir_.c_str());
 
     const HttpResult fly_over_result = SendFlyOverWithMission(airline_key, detect_time_cur);
@@ -796,20 +879,37 @@ void HttpClient::RunPostLandWorkflow() {
                  detect_time_cur.c_str());
     }
 
-    const std::vector<std::string> image_paths = CollectPostLandImages(detect_time_cur);
-    if (image_paths.empty()) {
-        ROS_INFO("Post-land workflow found no images for detectTimeCur=%s",
-                 detect_time_cur.c_str());
+    if (post_land_image_source_mode_ == "drone_sd_card") {
+        const indooruav_msgs::TransferMissionMedia::Response media_response =
+            TransferMissionMediaFromController(airline_key, detect_time_cur);
+        if (media_response.result_code != 1) {
+            ROS_WARN("Post-land workflow controller SD-card transfer finished with resultCode=%d, matched=%d, uploaded=%d, failed=%d",
+                     media_response.result_code,
+                     media_response.matched_count,
+                     media_response.uploaded_count,
+                     media_response.failed_count);
+        } else {
+            ROS_INFO("Post-land workflow controller SD-card transfer succeeded, matched=%d, uploaded=%d, failed=%d",
+                     media_response.matched_count,
+                     media_response.uploaded_count,
+                     media_response.failed_count);
+        }
     } else {
-        for (const std::string& image_path : image_paths) {
-            const HttpResult send_pic_result = SendPicWithMission(image_path, airline_key, detect_time_cur);
-            if (send_pic_result.result_code != 1) {
-                ROS_WARN("Post-land workflow sendPic failed for [%s] with resultCode=%d, continuing",
-                         image_path.c_str(),
-                         send_pic_result.result_code);
-                continue;
+        const std::vector<std::string> image_paths = CollectPostLandImages(detect_time_cur);
+        if (image_paths.empty()) {
+            ROS_INFO("Post-land workflow found no images for detectTimeCur=%s",
+                     detect_time_cur.c_str());
+        } else {
+            for (const std::string& image_path : image_paths) {
+                const HttpResult send_pic_result = SendPicWithMission(image_path, airline_key, detect_time_cur);
+                if (send_pic_result.result_code != 1) {
+                    ROS_WARN("Post-land workflow sendPic failed for [%s] with resultCode=%d, continuing",
+                             image_path.c_str(),
+                             send_pic_result.result_code);
+                    continue;
+                }
+                ROS_INFO("Post-land workflow uploaded image: %s", image_path.c_str());
             }
-            ROS_INFO("Post-land workflow uploaded image: %s", image_path.c_str());
         }
     }
 
@@ -857,6 +957,26 @@ bool HttpClient::HandleSendAirline(indooruav_http::SendAirline::Request& req,
 bool HttpClient::HandleSendPic(indooruav_http::SendPic::Request& req,
                                indooruav_http::SendPic::Response& res) {
     HttpResult result = SendPic(req.image_path);
+    res.result_code = result.result_code;
+    return true;
+}
+
+bool HttpClient::HandleUploadImageBytes(indooruav_msgs::UploadImageBytes::Request& req,
+                                        indooruav_msgs::UploadImageBytes::Response& res) {
+    const HttpResult result = SendPicBytesWithMission(req.image_extension,
+                                                      req.image_bytes,
+                                                      req.airline_key,
+                                                      req.detect_time_cur);
+    if (result.result_code == 1) {
+        ROS_INFO("Uploaded image bytes from source [%s] for detectTimeCur=%s",
+                 req.source_name.c_str(),
+                 req.detect_time_cur.c_str());
+    } else {
+        ROS_WARN("Failed to upload image bytes from source [%s] for detectTimeCur=%s, resultCode=%d",
+                 req.source_name.c_str(),
+                 req.detect_time_cur.c_str(),
+                 result.result_code);
+    }
     res.result_code = result.result_code;
     return true;
 }

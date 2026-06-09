@@ -28,6 +28,8 @@
 #include "indooruav_http/SendPic.h"
 #include "indooruav_http/SendPicOver.h"
 #include "indooruav_http/TakeoffState.h"
+#include "indooruav_msgs/TransferMissionMedia.h"
+#include "indooruav_msgs/UploadImageBytes.h"
 
 namespace indooruav_http {
 
@@ -73,6 +75,10 @@ private:
 	HttpResult SendFlyOver();
 	HttpResult SendPicOver();
 	HttpResult AirlineSync();
+	HttpResult SendPicBytesWithMission(const std::string& image_extension,
+									   const std::vector<uint8_t>& image_bytes,
+									   const std::string& airline_key,
+									   const std::string& detect_time_cur);
 	HttpResult SendPicWithMission(const std::string& image_path,
 								  const std::string& airline_key,
 								  const std::string& detect_time_cur);
@@ -85,9 +91,14 @@ private:
 	std::string GetTimeStamp() const;
 	bool ReadBinaryFile(const std::string& image_path, std::string* file_bytes) const;
 	std::string GetImageExtension(const std::string& image_path) const;
+	std::string NormalizeImageExtension(const std::string& image_extension) const;
+	std::string GetImageMimeTypeByExtension(const std::string& image_extension) const;
 	std::string GetImageMimeType(const std::string& image_path) const;
 	bool IsSupportedImageExtension(const std::string& extension) const;
 	std::vector<std::string> CollectPostLandImages(const std::string& detect_time_cur) const;
+	indooruav_msgs::TransferMissionMedia::Response TransferMissionMediaFromController(
+		const std::string& airline_key,
+		const std::string& detect_time_cur);
 	void StartPostLandWorkflow();
 	void RunPostLandWorkflow();
 
@@ -95,6 +106,8 @@ private:
 						   indooruav_http::SendAirline::Response& res);
 	bool HandleSendPic(indooruav_http::SendPic::Request& req,
 					   indooruav_http::SendPic::Response& res);
+	bool HandleUploadImageBytes(indooruav_msgs::UploadImageBytes::Request& req,
+								indooruav_msgs::UploadImageBytes::Response& res);
 	bool HandleSetTakeoffState(indooruav_http::TakeoffState::Request& req,
 							   indooruav_http::TakeoffState::Response& res);
 	bool HandleSendErrorData(indooruav_http::SendErrorData::Request& req,
@@ -122,6 +135,8 @@ private:
 	int flight_state_sample_rate_ = 1;
 	double takeoff_state_interval_ = 3.0;
 	std::string post_land_image_root_dir_;
+	std::string post_land_image_source_mode_;
+	std::string controller_upload_mission_media_service_;
 
 	std::unique_ptr<httplib::Client> client_;
 	std::mutex http_mutex_;
@@ -169,12 +184,14 @@ private:
 
 	ros::ServiceServer send_airline_service_;
 	ros::ServiceServer send_pic_service_;
+	ros::ServiceServer upload_image_bytes_service_;
 	ros::ServiceServer set_takeoff_state_service_;
 	ros::ServiceServer send_error_data_service_;
 	ros::ServiceServer send_fly_over_service_;
 	ros::ServiceServer send_pic_over_service_;
 	ros::ServiceServer airline_sync_service_;
 	ros::ServiceServer run_post_land_workflow_service_;
+	ros::ServiceClient transfer_mission_media_client_;
 
 	std::string airline_key_topic_;
 	std::string airline_info_topic_;

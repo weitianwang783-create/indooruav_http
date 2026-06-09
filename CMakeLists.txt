@@ -4,6 +4,7 @@ project(indooruav_http)
 add_compile_options(-std=c++14)
 
 find_package(catkin REQUIRED COMPONENTS
+  indooruav_msgs
   roscpp
   std_msgs
   std_srvs
@@ -32,7 +33,7 @@ generate_messages(
 
 catkin_package(
   INCLUDE_DIRS include
-  CATKIN_DEPENDS roscpp std_msgs std_srvs sensor_msgs geometry_msgs nav_msgs tf message_runtime
+  CATKIN_DEPENDS indooruav_msgs roscpp std_msgs std_srvs sensor_msgs geometry_msgs nav_msgs tf message_runtime
 )
 
 include_directories(
