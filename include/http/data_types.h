@@ -77,10 +77,6 @@ struct DeviceState {
 	double battery_rssi = 0.0;
 	double battery_volt = 0.0;
 	int battery_cycle_num = 0;
-	int drone_nest_state = 0;
-	int putter_lr_state = 0;
-	int putter_ba_state = 0;
-	int putter_state = 0;
 
 	json ToJson() const {
 		return json{
@@ -92,11 +88,7 @@ struct DeviceState {
 			{"batterySoc", battery_soc},
 			{"batteryRssi", battery_rssi},
 			{"batteryVolt", battery_volt},
-			{"batteryCycleNum", battery_cycle_num},
-			{"droneNestState", drone_nest_state},
-			{"putterLrState", putter_lr_state},
-			{"putterBaState", putter_ba_state},
-			{"putterState", putter_state}
+			{"batteryCycleNum", battery_cycle_num}
 		};
 	}
 };

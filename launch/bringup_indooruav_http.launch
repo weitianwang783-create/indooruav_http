@@ -1,11 +1,6 @@
 <launch>
-  <arg name="start_core" default="true" />
   <arg name="server_config" default="$(find indooruav_http)/config/http_server.yaml" />
   <arg name="client_config" default="$(find indooruav_http)/config/http_client.yaml" />
-
-  <group if="$(arg start_core)">
-    <include file="$(find indooruav_core)/launch/bringup_indooruav_core.launch" />
-  </group>
 
   <node pkg="indooruav_http" type="indooruav_http_server" name="indooruav_http_server" output="screen">
     <rosparam command="load" file="$(arg server_config)" />

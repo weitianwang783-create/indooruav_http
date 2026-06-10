@@ -104,10 +104,6 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
     nh_private.param<double>("control_rssi", current_device_state_.control_rssi, 0.0);
     nh_private.param<double>("battery_rssi", current_device_state_.battery_rssi, 0.0);
     nh_private.param<int>("battery_cycle_num", current_device_state_.battery_cycle_num, 0);
-    nh_private.param<int>("drone_nest_state", current_device_state_.drone_nest_state, 0);
-    nh_private.param<int>("putter_lr_state", current_device_state_.putter_lr_state, 0);
-    nh_private.param<int>("putter_ba_state", current_device_state_.putter_ba_state, 0);
-    nh_private.param<int>("putter_state", current_device_state_.putter_state, 0);
     nh_private.param<int>("takeoff_state", takeoff_state_, 1);
 
     SetupSubscribers(nh);

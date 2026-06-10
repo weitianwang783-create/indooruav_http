@@ -97,11 +97,7 @@ def send_device_data_task():
                 "batterySoc": 90.9,
                 "batteryRssi": 99.9,
                 "batteryVolt": 40.1,
-                "batteryCycleNum": 1,
-                "droneNestState": 1,
-                "putterLrState": 1,
-                "putterBaState": 1,
-                "putterState": 1
+                "batteryCycleNum": 1
             }
 
             url = f"{server_url}/sendDeviceData?siteId={site_id}&deviceId={device_id}"

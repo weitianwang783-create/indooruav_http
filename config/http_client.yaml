@@ -11,5 +11,5 @@ uav_online_timeout_sec: 5.0
 odom_topic: "/Odometry_rotate"
 odom_fallback_topic: "/Odometry"
 post_land_image_root_dir: "/tmp/indooruav_post_land_images"
-post_land_image_source_mode: "local_fs"
+post_land_image_source_mode: "drone_sd_card"
 controller_upload_mission_media_service: "/indooruav_controller/controller_hardware/upload_mission_photos_from_sd"

@@ -65,11 +65,12 @@ source ~/catkin_ws/devel/setup.bash
 roslaunch indooruav_http bringup_indooruav_http.launch
 ```
 
-可选参数示例：
+说明：
 
-```bash
-roslaunch indooruav_http bringup_indooruav_http.launch start_core:=false
-```
+- 这个 launch 现在只启动 `indooruav_http_server` 和 `indooruav_http_client`
+- 不会再自动启动 `indooruav_core`
+
+可选参数示例：
 
 ```bash
 roslaunch indooruav_http bringup_indooruav_http.launch \
@@ -635,14 +636,14 @@ roslaunch ~/Project/IndoorUavInspection2/catkin_ws/src/indooruav_controller/laun
 source /opt/ros/noetic/setup.bash
 source ~/Project/IndoorUavInspection2/catkin_ws/devel/setup.bash
 
-roslaunch ~/Project/IndoorUavInspection2/catkin_ws/src/indooruav_http/launch/bringup_indooruav_http.launch start_core:=false
+roslaunch ~/Project/IndoorUavInspection2/catkin_ws/src/indooruav_http/launch/bringup_indooruav_http.launch
 ```
 
 如果你的 `rospack` 环境已经正常，也可以用包名启动：
 
 ```bash
 roslaunch indooruav_controller bringup_controller_hardware.launch
-roslaunch indooruav_http bringup_indooruav_http.launch start_core:=false
+roslaunch indooruav_http bringup_indooruav_http.launch
 ```
 
 ### 9.3 终端 3：先记录任务时间，再写入 `/airlineInfo`
