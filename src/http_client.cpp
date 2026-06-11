@@ -334,14 +334,21 @@ void HttpClient::DetectionCallback(const std_msgs::String::ConstPtr& msg) {
 void HttpClient::AirlineInfoCallback(const std_msgs::String::ConstPtr& msg) {
     try {
         json j = json::parse(msg->data);
+        const int site_id = j.value("siteId", 0);
+        const int device_id = j.value("deviceId", 0);
         const std::string airline_key = j.value("airlineKey", "");
         const std::string detect_time_cur = j.value("detectTimeCur", "");
-        if (airline_key.empty() || detect_time_cur.empty()) {
-            ROS_WARN("Ignored airline info update due to missing airlineKey or detectTimeCur");
+        if (site_id <= 0 || device_id <= 0 || airline_key.empty() || detect_time_cur.empty()) {
+            ROS_WARN("Ignored airline info update due to missing siteId, deviceId, airlineKey, or detectTimeCur");
             return;
         }
 
         std::lock_guard<std::mutex> lock(airline_mutex_);
+        airline_info_site_id_ = site_id;
+        airline_info_device_id_ = device_id;
+        airline_info_airline_key_ = airline_key;
+        airline_info_detect_time_cur_ = detect_time_cur;
+        has_airline_info_context_ = true;
         airline_key_ = airline_key;
         detect_time_cur_ = detect_time_cur;
     } catch (const std::exception& e) {
@@ -352,6 +359,68 @@ void HttpClient::AirlineInfoCallback(const std_msgs::String::ConstPtr& msg) {
 void HttpClient::AirlineKeyCallback(const std_msgs::String::ConstPtr& msg) {
     std::lock_guard<std::mutex> lock(airline_mutex_);
     airline_key_ = msg->data;
+}
+
+void HttpClient::GetCurrentTargetIds(int* site_id, int* device_id) {
+    if (site_id == nullptr || device_id == nullptr) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(airline_mutex_);
+    if (has_airline_info_context_) {
+        *site_id = airline_info_site_id_;
+        *device_id = airline_info_device_id_;
+        return;
+    }
+
+    *site_id = site_id_;
+    *device_id = device_id_;
+}
+
+bool HttpClient::GetCurrentMissionContext(int* site_id,
+                                          int* device_id,
+                                          std::string* airline_key,
+                                          std::string* detect_time_cur) {
+    if (site_id == nullptr || device_id == nullptr ||
+        airline_key == nullptr || detect_time_cur == nullptr) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(airline_mutex_);
+    if (has_airline_info_context_) {
+        *site_id = airline_info_site_id_;
+        *device_id = airline_info_device_id_;
+        *airline_key = airline_info_airline_key_;
+        *detect_time_cur = airline_info_detect_time_cur_;
+        return !airline_key->empty() && !detect_time_cur->empty();
+    }
+
+    *site_id = site_id_;
+    *device_id = device_id_;
+    *airline_key = airline_key_;
+    *detect_time_cur = detect_time_cur_;
+    return !airline_key->empty() && !detect_time_cur->empty();
+}
+
+void HttpClient::ResolveTargetIdsForMission(const std::string& airline_key,
+                                            const std::string& detect_time_cur,
+                                            int* site_id,
+                                            int* device_id) {
+    if (site_id == nullptr || device_id == nullptr) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(airline_mutex_);
+    if (has_airline_info_context_ &&
+        airline_info_airline_key_ == airline_key &&
+        airline_info_detect_time_cur_ == detect_time_cur) {
+        *site_id = airline_info_site_id_;
+        *device_id = airline_info_device_id_;
+        return;
+    }
+
+    *site_id = site_id_;
+    *device_id = device_id_;
 }
 
 void HttpClient::TakeoffStateTopicCallback(const std_msgs::Int32::ConstPtr& msg) {
@@ -415,8 +484,12 @@ HttpResult HttpClient::SendAirline(const Airline& airline) {
         return result;
     }
 
-    std::string path = "/sendAirline?siteId=" + std::to_string(site_id_) +
-                       "&deviceId=" + std::to_string(device_id_);
+    int site_id = 0;
+    int device_id = 0;
+    GetCurrentTargetIds(&site_id, &device_id);
+
+    std::string path = "/sendAirline?siteId=" + std::to_string(site_id) +
+                       "&deviceId=" + std::to_string(device_id);
 
     const std::string file_body = airline.ToJson().dump();
     httplib::UploadFormDataItems items;
@@ -427,18 +500,18 @@ HttpResult HttpClient::SendAirline(const Airline& airline) {
 }
 
 HttpResult HttpClient::SendPic(const std::string& image_path) {
+    int site_id = 0;
+    int device_id = 0;
     std::string airline_key;
     std::string detect_time_cur;
-    {
-        std::lock_guard<std::mutex> lock(airline_mutex_);
-        airline_key = airline_key_;
-        detect_time_cur = detect_time_cur_;
-    }
+    GetCurrentMissionContext(&site_id, &device_id, &airline_key, &detect_time_cur);
 
-    return SendPicWithMission(image_path, airline_key, detect_time_cur);
+    return SendPicWithMission(site_id, device_id, image_path, airline_key, detect_time_cur);
 }
 
-HttpResult HttpClient::SendPicBytesWithMission(const std::string& image_extension,
+HttpResult HttpClient::SendPicBytesWithMission(int site_id,
+                                               int device_id,
+                                               const std::string& image_extension,
                                                const std::vector<uint8_t>& image_bytes,
                                                const std::string& airline_key,
                                                const std::string& detect_time_cur) {
@@ -461,8 +534,8 @@ HttpResult HttpClient::SendPicBytesWithMission(const std::string& image_extensio
     const std::string upload_filename = std::to_string(upload_sequence) + extension;
     const std::string file_bytes(reinterpret_cast<const char*>(image_bytes.data()), image_bytes.size());
 
-    std::string path = "/sendPic?siteId=" + std::to_string(site_id_) +
-                       "&deviceId=" + std::to_string(device_id_) +
+    std::string path = "/sendPic?siteId=" + std::to_string(site_id) +
+                       "&deviceId=" + std::to_string(device_id) +
                        "&airlineKey=" + airline_key +
                        "&detectTimeCur=" + detect_time_cur;
 
@@ -473,7 +546,9 @@ HttpResult HttpClient::SendPicBytesWithMission(const std::string& image_extensio
     return ParseResult(client_->Post(path.c_str(), items));
 }
 
-HttpResult HttpClient::SendPicWithMission(const std::string& image_path,
+HttpResult HttpClient::SendPicWithMission(int site_id,
+                                          int device_id,
+                                          const std::string& image_path,
                                           const std::string& airline_key,
                                           const std::string& detect_time_cur) {
     if (image_path.empty()) {
@@ -498,12 +573,21 @@ HttpResult HttpClient::SendPicWithMission(const std::string& image_path,
     }
 
     std::vector<uint8_t> bytes(file_bytes.begin(), file_bytes.end());
-    return SendPicBytesWithMission(GetImageExtension(image_path), bytes, airline_key, detect_time_cur);
+    return SendPicBytesWithMission(site_id,
+                                   device_id,
+                                   GetImageExtension(image_path),
+                                   bytes,
+                                   airline_key,
+                                   detect_time_cur);
 }
 
 HttpResult HttpClient::SendDeviceState(const DeviceState& device_state) {
-    std::string path = "/sendDeviceData?siteId=" + std::to_string(site_id_) +
-                       "&deviceId=" + std::to_string(device_id_);
+    int site_id = 0;
+    int device_id = 0;
+    GetCurrentTargetIds(&site_id, &device_id);
+
+    std::string path = "/sendDeviceData?siteId=" + std::to_string(site_id) +
+                       "&deviceId=" + std::to_string(device_id);
 
     const std::string file_body = device_state.ToJson().dump();
     httplib::UploadFormDataItems items;
@@ -514,13 +598,11 @@ HttpResult HttpClient::SendDeviceState(const DeviceState& device_state) {
 }
 
 HttpResult HttpClient::SendFlightStates(const std::vector<FlightState>& flight_states) {
+    int site_id = 0;
+    int device_id = 0;
     std::string airline_key;
     std::string detect_time_cur;
-    {
-        std::lock_guard<std::mutex> lock(airline_mutex_);
-        airline_key = airline_key_;
-        detect_time_cur = detect_time_cur_;
-    }
+    GetCurrentMissionContext(&site_id, &device_id, &airline_key, &detect_time_cur);
 
     if (airline_key.empty() || detect_time_cur.empty()) {
         ROS_WARN("sendFlyData skipped because airlineKey or detectTimeCur from /airlineInfo is missing");
@@ -529,8 +611,8 @@ HttpResult HttpClient::SendFlightStates(const std::vector<FlightState>& flight_s
         return result;
     }
 
-    std::string path = "/sendFlyData?siteId=" + std::to_string(site_id_) +
-                       "&deviceId=" + std::to_string(device_id_) +
+    std::string path = "/sendFlyData?siteId=" + std::to_string(site_id) +
+                       "&deviceId=" + std::to_string(device_id) +
                        "&airlineKey=" + airline_key +
                        "&detectTimeCur=" + detect_time_cur;
 
@@ -547,13 +629,11 @@ HttpResult HttpClient::SendFlightStates(const std::vector<FlightState>& flight_s
 }
 
 HttpResult HttpClient::SendErrorData(const ErrorData& error_data) {
+    int site_id = 0;
+    int device_id = 0;
     std::string airline_key;
     std::string detect_time_cur;
-    {
-        std::lock_guard<std::mutex> lock(airline_mutex_);
-        airline_key = airline_key_;
-        detect_time_cur = detect_time_cur_;
-    }
+    GetCurrentMissionContext(&site_id, &device_id, &airline_key, &detect_time_cur);
 
     if (airline_key.empty() || detect_time_cur.empty()) {
         ROS_WARN("sendErrorData skipped because airlineKey or detectTimeCur from /airlineInfo is missing");
@@ -562,8 +642,8 @@ HttpResult HttpClient::SendErrorData(const ErrorData& error_data) {
         return result;
     }
 
-    std::string path = "/sendErrorData?siteId=" + std::to_string(site_id_) +
-                       "&deviceId=" + std::to_string(device_id_) +
+    std::string path = "/sendErrorData?siteId=" + std::to_string(site_id) +
+                       "&deviceId=" + std::to_string(device_id) +
                        "&airlineKey=" + airline_key +
                        "&detectTimeCur=" + detect_time_cur;
 
@@ -575,8 +655,12 @@ HttpResult HttpClient::SendErrorData(const ErrorData& error_data) {
 }
 
 HttpResult HttpClient::SendTakeoffState(int takeoff_state) {
-    std::string path = "/sendTakeoffState?siteId=" + std::to_string(site_id_) +
-                       "&deviceId=" + std::to_string(device_id_) +
+    int site_id = 0;
+    int device_id = 0;
+    GetCurrentTargetIds(&site_id, &device_id);
+
+    std::string path = "/sendTakeoffState?siteId=" + std::to_string(site_id) +
+                       "&deviceId=" + std::to_string(device_id) +
                        "&takeoffState=" + std::to_string(takeoff_state);
 
     std::lock_guard<std::mutex> lock(http_mutex_);
@@ -584,18 +668,18 @@ HttpResult HttpClient::SendTakeoffState(int takeoff_state) {
 }
 
 HttpResult HttpClient::SendFlyOver() {
+    int site_id = 0;
+    int device_id = 0;
     std::string airline_key;
     std::string detect_time_cur;
-    {
-        std::lock_guard<std::mutex> lock(airline_mutex_);
-        airline_key = airline_key_;
-        detect_time_cur = detect_time_cur_;
-    }
+    GetCurrentMissionContext(&site_id, &device_id, &airline_key, &detect_time_cur);
 
-    return SendFlyOverWithMission(airline_key, detect_time_cur);
+    return SendFlyOverWithMission(site_id, device_id, airline_key, detect_time_cur);
 }
 
-HttpResult HttpClient::SendFlyOverWithMission(const std::string& airline_key,
+HttpResult HttpClient::SendFlyOverWithMission(int site_id,
+                                              int device_id,
+                                              const std::string& airline_key,
                                               const std::string& detect_time_cur) {
     if (airline_key.empty() || detect_time_cur.empty()) {
         ROS_WARN("sendFlyOver skipped because airlineKey or detectTimeCur from /airlineInfo is missing");
@@ -604,8 +688,8 @@ HttpResult HttpClient::SendFlyOverWithMission(const std::string& airline_key,
         return result;
     }
 
-    std::string path = "/sendFlyOver?siteId=" + std::to_string(site_id_) +
-                       "&deviceId=" + std::to_string(device_id_) +
+    std::string path = "/sendFlyOver?siteId=" + std::to_string(site_id) +
+                       "&deviceId=" + std::to_string(device_id) +
                        "&airlineKey=" + airline_key +
                        "&detectTimeCur=" + detect_time_cur;
 
@@ -614,18 +698,18 @@ HttpResult HttpClient::SendFlyOverWithMission(const std::string& airline_key,
 }
 
 HttpResult HttpClient::SendPicOver() {
+    int site_id = 0;
+    int device_id = 0;
     std::string airline_key;
     std::string detect_time_cur;
-    {
-        std::lock_guard<std::mutex> lock(airline_mutex_);
-        airline_key = airline_key_;
-        detect_time_cur = detect_time_cur_;
-    }
+    GetCurrentMissionContext(&site_id, &device_id, &airline_key, &detect_time_cur);
 
-    return SendPicOverWithMission(airline_key, detect_time_cur);
+    return SendPicOverWithMission(site_id, device_id, airline_key, detect_time_cur);
 }
 
-HttpResult HttpClient::SendPicOverWithMission(const std::string& airline_key,
+HttpResult HttpClient::SendPicOverWithMission(int site_id,
+                                              int device_id,
+                                              const std::string& airline_key,
                                               const std::string& detect_time_cur) {
     if (airline_key.empty() || detect_time_cur.empty()) {
         ROS_WARN("sendPicOver skipped because airlineKey or detectTimeCur from /airlineInfo is missing");
@@ -634,8 +718,8 @@ HttpResult HttpClient::SendPicOverWithMission(const std::string& airline_key,
         return result;
     }
 
-    std::string path = "/sendPicOver?siteId=" + std::to_string(site_id_) +
-                       "&deviceId=" + std::to_string(device_id_) +
+    std::string path = "/sendPicOver?siteId=" + std::to_string(site_id) +
+                       "&deviceId=" + std::to_string(device_id) +
                        "&airlineKey=" + airline_key +
                        "&detectTimeCur=" + detect_time_cur;
 
@@ -644,8 +728,12 @@ HttpResult HttpClient::SendPicOverWithMission(const std::string& airline_key,
 }
 
 HttpResult HttpClient::AirlineSync() {
-    std::string path = "/airlineSync?siteId=" + std::to_string(site_id_) +
-                       "&deviceId=" + std::to_string(device_id_);
+    int site_id = 0;
+    int device_id = 0;
+    GetCurrentTargetIds(&site_id, &device_id);
+
+    std::string path = "/airlineSync?siteId=" + std::to_string(site_id) +
+                       "&deviceId=" + std::to_string(device_id);
 
     std::lock_guard<std::mutex> lock(http_mutex_);
     return ParseResult(client_->Get(path.c_str()));
@@ -848,13 +936,11 @@ void HttpClient::RunPostLandWorkflow() {
         }
     } running_flag_guard{post_land_workflow_running_};
 
+    int site_id = 0;
+    int device_id = 0;
     std::string airline_key;
     std::string detect_time_cur;
-    {
-        std::lock_guard<std::mutex> lock(airline_mutex_);
-        airline_key = airline_key_;
-        detect_time_cur = detect_time_cur_;
-    }
+    GetCurrentMissionContext(&site_id, &device_id, &airline_key, &detect_time_cur);
 
     if (airline_key.empty() || detect_time_cur.empty()) {
         ROS_WARN("Post-land workflow skipped because airlineKey or detectTimeCur from /airlineInfo is missing");
@@ -866,7 +952,10 @@ void HttpClient::RunPostLandWorkflow() {
              post_land_image_source_mode_.c_str(),
              post_land_image_root_dir_.c_str());
 
-    const HttpResult fly_over_result = SendFlyOverWithMission(airline_key, detect_time_cur);
+    const HttpResult fly_over_result = SendFlyOverWithMission(site_id,
+                                                              device_id,
+                                                              airline_key,
+                                                              detect_time_cur);
     if (fly_over_result.result_code != 1) {
         ROS_WARN("Post-land workflow sendFlyOver failed with resultCode=%d, continuing upload flow",
                  fly_over_result.result_code);
@@ -897,7 +986,11 @@ void HttpClient::RunPostLandWorkflow() {
                      detect_time_cur.c_str());
         } else {
             for (const std::string& image_path : image_paths) {
-                const HttpResult send_pic_result = SendPicWithMission(image_path, airline_key, detect_time_cur);
+                const HttpResult send_pic_result = SendPicWithMission(site_id,
+                                                                      device_id,
+                                                                      image_path,
+                                                                      airline_key,
+                                                                      detect_time_cur);
                 if (send_pic_result.result_code != 1) {
                     ROS_WARN("Post-land workflow sendPic failed for [%s] with resultCode=%d, continuing",
                              image_path.c_str(),
@@ -909,7 +1002,10 @@ void HttpClient::RunPostLandWorkflow() {
         }
     }
 
-    const HttpResult pic_over_result = SendPicOverWithMission(airline_key, detect_time_cur);
+    const HttpResult pic_over_result = SendPicOverWithMission(site_id,
+                                                              device_id,
+                                                              airline_key,
+                                                              detect_time_cur);
     if (pic_over_result.result_code != 1) {
         ROS_WARN("Post-land workflow sendPicOver failed with resultCode=%d",
                  pic_over_result.result_code);
@@ -959,7 +1055,13 @@ bool HttpClient::HandleSendPic(indooruav_http::SendPic::Request& req,
 
 bool HttpClient::HandleUploadImageBytes(indooruav_msgs::UploadImageBytes::Request& req,
                                         indooruav_msgs::UploadImageBytes::Response& res) {
-    const HttpResult result = SendPicBytesWithMission(req.image_extension,
+    int site_id = 0;
+    int device_id = 0;
+    ResolveTargetIdsForMission(req.airline_key, req.detect_time_cur, &site_id, &device_id);
+
+    const HttpResult result = SendPicBytesWithMission(site_id,
+                                                      device_id,
+                                                      req.image_extension,
                                                       req.image_bytes,
                                                       req.airline_key,
                                                       req.detect_time_cur);

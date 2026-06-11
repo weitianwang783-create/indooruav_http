@@ -30,23 +30,26 @@ bool HttpServer::Start() {
         return false;
     }
 
+    if (!server_->bind_to_port("0.0.0.0", port_)) {
+        ROS_ERROR("Failed to bind HTTP server to 0.0.0.0:%d", port_);
+        return false;
+    }
+
+    is_running_ = true;
     server_thread_ = std::make_unique<std::thread>([this]() {
         try {
-            is_running_ = true;
-            server_->listen("0.0.0.0", port_);
+            ROS_INFO("HTTP server listening on 0.0.0.0:%d", port_);
+            const bool listen_ok = server_->listen_after_bind();
+            if (is_running_ && !listen_ok) {
+                ROS_ERROR("HTTP server stopped listening unexpectedly on 0.0.0.0:%d", port_);
+            }
         } catch (const std::exception& e) {
             ROS_ERROR("HTTP server exception: %s", e.what());
-            is_running_ = false;
         }
         is_running_ = false;
     });
 
-    ros::Time start = ros::Time::now();
-    while (!is_running_ && (ros::Time::now() - start).toSec() < 1.0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-
-    return is_running_;
+    return true;
 }
 
 // 停止HTTP监听并回收线程
@@ -124,7 +127,7 @@ void HttpServer::HandleAirlineInfo(const httplib::Request& req, httplib::Respons
               GetIntParam(req, "deviceId", &device_id) &&
               GetStringParam(req, "airlineKey", &airline_key) &&
               GetStringParam(req, "detectTimeCur", &detect_time_cur);
-
+    std::cout << "Site ID: " << site_id << ", Device ID: " << device_id << ", Airline Key: " << airline_key << ", Detect Time: " << detect_time_cur << std::endl;
     if (!ok && !req.body.empty()) {
         try {
             nlohmann::json body = nlohmann::json::parse(req.body);
@@ -200,11 +203,18 @@ void HttpServer::HandleCommand(const httplib::Request& req, httplib::Response& r
     }
 
     if (!ok) {
+        ROS_WARN("Rejected /sendCommand request from %s:%d due to invalid parameters",
+                 req.remote_addr.c_str(),
+                 req.remote_port);
         SendResult(res, 3);
         return;
     }
 
     if (command_mode < 1 || command_mode > 6) {
+        ROS_WARN("Rejected /sendCommand request from %s:%d due to unsupported commandMode=%d",
+                 req.remote_addr.c_str(),
+                 req.remote_port,
+                 command_mode);
         SendResult(res, 3);
         return;
     }
@@ -216,9 +226,13 @@ void HttpServer::HandleCommand(const httplib::Request& req, httplib::Response& r
     }
 
     if (command_mode == 1) {
-        ROS_INFO("Received frontend takeoff command: siteId=%d, deviceId=%d, forwarding to service [%s]",
+        ROS_INFO("Received /sendCommand from %s:%d on %s, siteId=%d, deviceId=%d, commandMode=%d, forwarding to service [%s]",
+                 req.remote_addr.c_str(),
+                 req.remote_port,
+                 req.local_addr.c_str(),
                  site_id,
                  device_id,
+                 command_mode,
                  service_name.c_str());
     }
 

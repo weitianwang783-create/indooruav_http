@@ -15,7 +15,7 @@
 
 当前已支持的关键能力：
 
-- 缓存前端通过 `/airlineInfo` 下发的 `airlineKey` 和 `detectTimeCur`
+- 缓存前端通过 `/airlineInfo` 下发的 `siteId`、`deviceId`、`airlineKey`、`detectTimeCur`
 - 前端通过 `/sendCommand?commandMode=1` 触发起飞事件
 - 通过 `/indooruav_http/send_pic` 上传单张本地图片
 - 通过 `/indooruav_http/send_pic_over` 通知图片批次上传完成
@@ -91,6 +91,7 @@ rosrun indooruav_http indooruav_http_server _local_port:=20000
 
 说明：
 
+- `/airlineInfo` 会同步当前任务的 `siteId`、`deviceId`、`airlineKey`、`detectTimeCur`
 - `commandMode=1` 当前表示起飞
 - 请求链路为：
   - 前端 `/sendCommand`
@@ -113,6 +114,7 @@ rosrun indooruav_http indooruav_http_client \
   - 前端服务器地址
 - `site_id` / `device_id`
   - 站点编号和设备编号
+  - 作为默认值使用；一旦前端调用 `/airlineInfo`，后续机载上报会改用 `/airlineInfo` 里的 `siteId` 和 `deviceId`
 - `device_state_interval`
   - 设备状态上报周期
 - `flight_state_interval`

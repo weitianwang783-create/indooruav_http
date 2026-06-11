@@ -75,16 +75,24 @@ private:
 	HttpResult SendFlyOver();
 	HttpResult SendPicOver();
 	HttpResult AirlineSync();
-	HttpResult SendPicBytesWithMission(const std::string& image_extension,
+	HttpResult SendPicBytesWithMission(int site_id,
+									   int device_id,
+									   const std::string& image_extension,
 									   const std::vector<uint8_t>& image_bytes,
 									   const std::string& airline_key,
 									   const std::string& detect_time_cur);
-	HttpResult SendPicWithMission(const std::string& image_path,
+	HttpResult SendPicWithMission(int site_id,
+								  int device_id,
+								  const std::string& image_path,
 								  const std::string& airline_key,
 								  const std::string& detect_time_cur);
-	HttpResult SendFlyOverWithMission(const std::string& airline_key,
+	HttpResult SendFlyOverWithMission(int site_id,
+									  int device_id,
+									  const std::string& airline_key,
 									  const std::string& detect_time_cur);
-	HttpResult SendPicOverWithMission(const std::string& airline_key,
+	HttpResult SendPicOverWithMission(int site_id,
+									  int device_id,
+									  const std::string& airline_key,
 									  const std::string& detect_time_cur);
 
 	HttpResult ParseResult(const httplib::Result& result);
@@ -95,6 +103,15 @@ private:
 	std::string GetImageMimeTypeByExtension(const std::string& image_extension) const;
 	std::string GetImageMimeType(const std::string& image_path) const;
 	bool IsSupportedImageExtension(const std::string& extension) const;
+	void GetCurrentTargetIds(int* site_id, int* device_id);
+	bool GetCurrentMissionContext(int* site_id,
+								  int* device_id,
+								  std::string* airline_key,
+								  std::string* detect_time_cur);
+	void ResolveTargetIdsForMission(const std::string& airline_key,
+									const std::string& detect_time_cur,
+									int* site_id,
+									int* device_id);
 	std::vector<std::string> CollectPostLandImages(const std::string& detect_time_cur) const;
 	indooruav_msgs::TransferMissionMedia::Response TransferMissionMediaFromController(
 		const std::string& airline_key,
@@ -162,6 +179,11 @@ private:
 	double abnormal_locz_ = 0.0;
 	bool enable_detection_error_ = true;
 
+	int airline_info_site_id_ = 0;
+	int airline_info_device_id_ = 0;
+	std::string airline_info_airline_key_;
+	std::string airline_info_detect_time_cur_;
+	bool has_airline_info_context_ = false;
 	std::string airline_key_;
 	std::string detect_time_cur_;
 	std::mutex airline_mutex_;

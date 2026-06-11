@@ -11,6 +11,8 @@
 用途：
 
 - 前端下发当前任务标识
+- 缓存 `siteId`
+- 缓存 `deviceId`
 - 缓存 `airlineKey`
 - 缓存 `detectTimeCur`
 
@@ -34,6 +36,12 @@ GET /airlineInfo?siteId=11&deviceId=1&airlineKey=AAAA&detectTimeCur=202507011259
 ```json
 {"resultCode":1}
 ```
+
+说明：
+
+- `/airlineInfo` 的四个字段会作为当前任务上下文
+- 后续机载发往前端的上报请求会优先复用这四个字段
+- 如果还没收到 `/airlineInfo`，则 `siteId` 和 `deviceId` 回退为节点启动参数
 
 ### 1.2 `/sendCommand`
 
