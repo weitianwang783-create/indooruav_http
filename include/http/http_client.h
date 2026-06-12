@@ -53,6 +53,7 @@ private:
 	void SetupServices(ros::NodeHandle& nh);
 	void MarkTelemetryReceived();
 	void UpdateDerivedDeviceState();
+	bool HasFreshDeviceStateInfo() const;
 
 	void BatteryCallback(const sensor_msgs::BatteryState::ConstPtr& msg);
 	void OdomCallback(const nav_msgs::Odometry::ConstPtr& msg);
@@ -60,6 +61,7 @@ private:
 	void DetectionCallback(const std_msgs::String::ConstPtr& msg);
 	void AirlineInfoCallback(const std_msgs::String::ConstPtr& msg);
 	void AirlineKeyCallback(const std_msgs::String::ConstPtr& msg);
+	void DeviceStateInfoCallback(const std_msgs::String::ConstPtr& msg);
 	void TakeoffStateTopicCallback(const std_msgs::Int32::ConstPtr& msg);
 
 	void DeviceStateTimerCallback(const ros::TimerEvent& event);
@@ -104,11 +106,12 @@ private:
 	std::string GetImageMimeType(const std::string& image_path) const;
 	bool IsSupportedImageExtension(const std::string& extension) const;
 	void GetCurrentTargetIds(int* site_id, int* device_id);
+	bool GetAirlineInfoTargetIds(int* site_id, int* device_id);
 	bool GetCurrentMissionContext(int* site_id,
 								  int* device_id,
 								  std::string* airline_key,
 								  std::string* detect_time_cur);
-	void ResolveTargetIdsForMission(const std::string& airline_key,
+	bool ResolveTargetIdsForMission(const std::string& airline_key,
 									const std::string& detect_time_cur,
 									int* site_id,
 									int* device_id);
@@ -166,6 +169,7 @@ private:
 	ros::Time last_telemetry_time_;
 
 	ros::Time last_sample_time_;
+	ros::Time last_device_state_info_time_;
 	double gimbal_roll_ = 0.0;
 	double gimbal_pitch_ = 0.0;
 	double gimbal_yaw_ = 0.0;
@@ -178,6 +182,7 @@ private:
 	double abnormal_locy_ = 0.0;
 	double abnormal_locz_ = 0.0;
 	bool enable_detection_error_ = true;
+	bool has_device_state_info_ = false;
 
 	int airline_info_site_id_ = 0;
 	int airline_info_device_id_ = 0;
@@ -198,6 +203,7 @@ private:
 	ros::Subscriber detection_sub_;
 	ros::Subscriber airline_info_sub_;
 	ros::Subscriber airline_key_sub_;
+	ros::Subscriber device_state_info_sub_;
 	ros::Subscriber takeoff_state_sub_;
 
 	ros::Timer device_state_timer_;
@@ -217,6 +223,7 @@ private:
 
 	std::string airline_key_topic_;
 	std::string airline_info_topic_;
+	std::string device_state_info_topic_;
 	std::string takeoff_state_topic_;
 	std::string battery_topic_;
 	std::string odom_topic_;

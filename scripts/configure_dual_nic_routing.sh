@@ -65,6 +65,17 @@ require_ipv4_cidr() {
   ip -o -4 addr show dev "$iface" primary scope global | awk '{print $4; exit}'
 }
 
+network_from_cidr() {
+  local cidr="$1"
+  python3 - "$cidr" <<'PY'
+import ipaddress
+import sys
+
+iface = ipaddress.ip_interface(sys.argv[1])
+print(iface.network.with_prefixlen)
+PY
+}
+
 delete_rule_if_present() {
   local pref="$1"
   while ip rule show | grep -q "^${pref}:"; do
@@ -76,6 +87,8 @@ WLAN_CIDR="$(require_ipv4_cidr "$WLAN_IFACE")"
 ETH_CIDR="$(require_ipv4_cidr "$ETH_IFACE")"
 WLAN_IP="${WLAN_CIDR%/*}"
 ETH_IP="${ETH_CIDR%/*}"
+WLAN_NET="$(network_from_cidr "$WLAN_CIDR")"
+ETH_NET="$(network_from_cidr "$ETH_CIDR")"
 WLAN_GW="$(ip route show default dev "$WLAN_IFACE" | awk '/default/ {print $3; exit}')"
 
 if [[ -z "$RADAR_IP" ]]; then
@@ -94,6 +107,7 @@ fi
 
 echo "Wi-Fi : $WLAN_IFACE $WLAN_CIDR gateway $WLAN_GW"
 echo "Wired : $ETH_IFACE $ETH_CIDR"
+echo "Nets  : $WLAN_IFACE $WLAN_NET, $ETH_IFACE $ETH_NET"
 if [[ -n "$RADAR_IP" ]]; then
   echo "Radar : $RADAR_IP"
 else
@@ -101,19 +115,19 @@ else
 fi
 
 # Keep the main table biased toward Wi-Fi for the shared LAN subnet.
-ip route replace "$WLAN_CIDR" dev "$WLAN_IFACE" scope link src "$WLAN_IP" metric "$WLAN_METRIC"
-ip route replace "$ETH_CIDR" dev "$ETH_IFACE" scope link src "$ETH_IP" metric "$ETH_METRIC"
+ip route replace "$WLAN_NET" dev "$WLAN_IFACE" scope link src "$WLAN_IP" metric "$WLAN_METRIC"
+ip route replace "$ETH_NET" dev "$ETH_IFACE" scope link src "$ETH_IP" metric "$ETH_METRIC"
 if [[ -n "$RADAR_IP" ]]; then
   ip route replace "${RADAR_IP}/32" dev "$ETH_IFACE" scope link src "$ETH_IP" metric 50
 fi
 
 # Rebuild policy routing tables.
 ip route flush table "$WLAN_TABLE"
-ip route add "$WLAN_CIDR" dev "$WLAN_IFACE" scope link src "$WLAN_IP" table "$WLAN_TABLE"
+ip route add "$WLAN_NET" dev "$WLAN_IFACE" scope link src "$WLAN_IP" table "$WLAN_TABLE"
 ip route add default via "$WLAN_GW" dev "$WLAN_IFACE" table "$WLAN_TABLE"
 
 ip route flush table "$ETH_TABLE"
-ip route add "$ETH_CIDR" dev "$ETH_IFACE" scope link src "$ETH_IP" table "$ETH_TABLE"
+ip route add "$ETH_NET" dev "$ETH_IFACE" scope link src "$ETH_IP" table "$ETH_TABLE"
 if [[ -n "$RADAR_IP" ]]; then
   ip route add "${RADAR_IP}/32" dev "$ETH_IFACE" scope link src "$ETH_IP" table "$ETH_TABLE"
 fi
@@ -128,6 +142,14 @@ sysctl -w net.ipv4.conf.all.rp_filter=2 >/dev/null
 sysctl -w "net.ipv4.conf.${WLAN_IFACE}.rp_filter=2" >/dev/null
 sysctl -w "net.ipv4.conf.${ETH_IFACE}.rp_filter=2" >/dev/null
 sysctl -w net.ipv4.conf.all.arp_filter=1 >/dev/null
+sysctl -w "net.ipv4.conf.${WLAN_IFACE}.arp_filter=1" >/dev/null
+sysctl -w "net.ipv4.conf.${ETH_IFACE}.arp_filter=1" >/dev/null
+sysctl -w net.ipv4.conf.all.arp_ignore=1 >/dev/null
+sysctl -w "net.ipv4.conf.${WLAN_IFACE}.arp_ignore=1" >/dev/null
+sysctl -w "net.ipv4.conf.${ETH_IFACE}.arp_ignore=1" >/dev/null
+sysctl -w net.ipv4.conf.all.arp_announce=2 >/dev/null
+sysctl -w "net.ipv4.conf.${WLAN_IFACE}.arp_announce=2" >/dev/null
+sysctl -w "net.ipv4.conf.${ETH_IFACE}.arp_announce=2" >/dev/null
 
 echo
 echo "Applied routes:"
@@ -137,7 +159,7 @@ echo "Applied rules:"
 ip rule show
 echo
 echo "Quick checks:"
-echo "  ip route get <developer_pc_ip>"
+echo "  ip route get <developer_pc_ip> from $WLAN_IP"
 if [[ -n "$RADAR_IP" ]]; then
-  echo "  ip route get $RADAR_IP"
+  echo "  ip route get $RADAR_IP from $ETH_IP"
 fi

@@ -80,6 +80,9 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
     nh_private.param<std::string>("airline_key", airline_key_, "AAAA");
     nh_private.param<std::string>("airline_info_topic", airline_info_topic_, "/indooruav_http/airline_info");
     nh_private.param<std::string>("airline_key_topic", airline_key_topic_, "/indooruav_http/airline_key");
+    nh_private.param<std::string>("device_state_info_topic",
+                                  device_state_info_topic_,
+                                  "/indooruav_controller/http/device_state");
     nh_private.param<std::string>("takeoff_state_topic", takeoff_state_topic_, "/indooruav_http/takeoff_state");
     nh_private.param<std::string>("battery_topic", battery_topic_, "/battery_state");
     nh_private.param<std::string>("odom_topic", odom_topic_, "/Odometry_rotate");
@@ -145,6 +148,7 @@ void HttpClient::SetupSubscribers(ros::NodeHandle& nh) {
     detection_sub_ = nh.subscribe(detection_topic_, 10, &HttpClient::DetectionCallback, this);
     airline_info_sub_ = nh.subscribe(airline_info_topic_, 10, &HttpClient::AirlineInfoCallback, this);
     airline_key_sub_ = nh.subscribe(airline_key_topic_, 10, &HttpClient::AirlineKeyCallback, this);
+    device_state_info_sub_ = nh.subscribe(device_state_info_topic_, 10, &HttpClient::DeviceStateInfoCallback, this);
     takeoff_state_sub_ = nh.subscribe(takeoff_state_topic_, 10, &HttpClient::TakeoffStateTopicCallback, this);
 }
 
@@ -192,6 +196,10 @@ void HttpClient::MarkTelemetryReceived() {
 }
 
 void HttpClient::UpdateDerivedDeviceState() {
+    if (HasFreshDeviceStateInfo()) {
+        return;
+    }
+
     int next_uav_state = 0;
     if (uav_online_timeout_sec_ <= 0.0) {
         next_uav_state = 1;
@@ -208,8 +216,29 @@ void HttpClient::UpdateDerivedDeviceState() {
     }
 }
 
+bool HttpClient::HasFreshDeviceStateInfo() const {
+    if (!has_device_state_info_) {
+        return false;
+    }
+
+    if (uav_online_timeout_sec_ <= 0.0) {
+        return true;
+    }
+
+    if (last_device_state_info_time_.isZero()) {
+        return false;
+    }
+
+    const double silence_sec = (ros::Time::now() - last_device_state_info_time_).toSec();
+    return silence_sec <= uav_online_timeout_sec_;
+}
+
 void HttpClient::BatteryCallback(const sensor_msgs::BatteryState::ConstPtr& msg) {
     MarkTelemetryReceived();
+    if (HasFreshDeviceStateInfo()) {
+        return;
+    }
+
     current_device_state_.battery_soc = msg->percentage * 100.0;
     current_device_state_.battery_volt = msg->voltage;
     current_device_state_.battery_temp = msg->temperature;
@@ -361,6 +390,45 @@ void HttpClient::AirlineKeyCallback(const std_msgs::String::ConstPtr& msg) {
     airline_key_ = msg->data;
 }
 
+void HttpClient::DeviceStateInfoCallback(const std_msgs::String::ConstPtr& msg) {
+    try {
+        const json j = json::parse(msg->data);
+        MarkTelemetryReceived();
+        has_device_state_info_ = true;
+        last_device_state_info_time_ = ros::Time::now();
+
+        if (j.contains("uavState")) {
+            current_device_state_.uav_state = j.value("uavState", current_device_state_.uav_state);
+        }
+        if (j.contains("controlState")) {
+            current_device_state_.control_state = j.value("controlState", current_device_state_.control_state);
+        }
+        if (j.contains("controlSoc")) {
+            current_device_state_.control_soc = j.value("controlSoc", current_device_state_.control_soc);
+        }
+        if (j.contains("controlRssi")) {
+            current_device_state_.control_rssi = j.value("controlRssi", current_device_state_.control_rssi);
+        }
+        if (j.contains("batteryTemp")) {
+            current_device_state_.battery_temp = j.value("batteryTemp", current_device_state_.battery_temp);
+        }
+        if (j.contains("batterySoc")) {
+            current_device_state_.battery_soc = j.value("batterySoc", current_device_state_.battery_soc);
+        }
+        if (j.contains("batteryRssi")) {
+            current_device_state_.battery_rssi = j.value("batteryRssi", current_device_state_.battery_rssi);
+        }
+        if (j.contains("batteryVolt")) {
+            current_device_state_.battery_volt = j.value("batteryVolt", current_device_state_.battery_volt);
+        }
+        if (j.contains("batteryCycleNum")) {
+            current_device_state_.battery_cycle_num = j.value("batteryCycleNum", current_device_state_.battery_cycle_num);
+        }
+    } catch (const std::exception& e) {
+        ROS_WARN("Failed to parse device state info JSON: %s", e.what());
+    }
+}
+
 void HttpClient::GetCurrentTargetIds(int* site_id, int* device_id) {
     if (site_id == nullptr || device_id == nullptr) {
         return;
@@ -377,6 +445,25 @@ void HttpClient::GetCurrentTargetIds(int* site_id, int* device_id) {
     *device_id = device_id_;
 }
 
+bool HttpClient::GetAirlineInfoTargetIds(int* site_id, int* device_id) {
+    if (site_id == nullptr || device_id == nullptr) {
+        return false;
+    }
+
+    std::lock_guard<std::mutex> lock(airline_mutex_);
+    if (!has_airline_info_context_ ||
+        airline_info_site_id_ <= 0 ||
+        airline_info_device_id_ <= 0 ||
+        airline_info_airline_key_.empty() ||
+        airline_info_detect_time_cur_.empty()) {
+        return false;
+    }
+
+    *site_id = airline_info_site_id_;
+    *device_id = airline_info_device_id_;
+    return true;
+}
+
 bool HttpClient::GetCurrentMissionContext(int* site_id,
                                           int* device_id,
                                           std::string* airline_key,
@@ -387,27 +474,27 @@ bool HttpClient::GetCurrentMissionContext(int* site_id,
     }
 
     std::lock_guard<std::mutex> lock(airline_mutex_);
-    if (has_airline_info_context_) {
-        *site_id = airline_info_site_id_;
-        *device_id = airline_info_device_id_;
-        *airline_key = airline_info_airline_key_;
-        *detect_time_cur = airline_info_detect_time_cur_;
-        return !airline_key->empty() && !detect_time_cur->empty();
+    if (!has_airline_info_context_ ||
+        airline_info_site_id_ <= 0 ||
+        airline_info_device_id_ <= 0 ||
+        airline_info_airline_key_.empty() ||
+        airline_info_detect_time_cur_.empty()) {
+        return false;
     }
 
-    *site_id = site_id_;
-    *device_id = device_id_;
-    *airline_key = airline_key_;
-    *detect_time_cur = detect_time_cur_;
-    return !airline_key->empty() && !detect_time_cur->empty();
+    *site_id = airline_info_site_id_;
+    *device_id = airline_info_device_id_;
+    *airline_key = airline_info_airline_key_;
+    *detect_time_cur = airline_info_detect_time_cur_;
+    return true;
 }
 
-void HttpClient::ResolveTargetIdsForMission(const std::string& airline_key,
+bool HttpClient::ResolveTargetIdsForMission(const std::string& airline_key,
                                             const std::string& detect_time_cur,
                                             int* site_id,
                                             int* device_id) {
     if (site_id == nullptr || device_id == nullptr) {
-        return;
+        return false;
     }
 
     std::lock_guard<std::mutex> lock(airline_mutex_);
@@ -416,11 +503,10 @@ void HttpClient::ResolveTargetIdsForMission(const std::string& airline_key,
         airline_info_detect_time_cur_ == detect_time_cur) {
         *site_id = airline_info_site_id_;
         *device_id = airline_info_device_id_;
-        return;
+        return airline_info_site_id_ > 0 && airline_info_device_id_ > 0;
     }
 
-    *site_id = site_id_;
-    *device_id = device_id_;
+    return false;
 }
 
 void HttpClient::TakeoffStateTopicCallback(const std_msgs::Int32::ConstPtr& msg) {
@@ -521,8 +607,9 @@ HttpResult HttpClient::SendPicBytesWithMission(int site_id,
         return result;
     }
 
-    if (airline_key.empty() || detect_time_cur.empty()) {
-        ROS_WARN("sendPic skipped because airlineKey or detectTimeCur from /airlineInfo is missing");
+    if (site_id <= 0 || device_id <= 0 ||
+        airline_key.empty() || detect_time_cur.empty()) {
+        ROS_WARN("sendPic skipped because siteId, deviceId, airlineKey, or detectTimeCur from /airlineInfo is missing");
         HttpResult result;
         result.result_code = 3;
         return result;
@@ -557,8 +644,9 @@ HttpResult HttpClient::SendPicWithMission(int site_id,
         return result;
     }
 
-    if (airline_key.empty() || detect_time_cur.empty()) {
-        ROS_WARN("sendPic skipped because airlineKey or detectTimeCur from /airlineInfo is missing");
+    if (site_id <= 0 || device_id <= 0 ||
+        airline_key.empty() || detect_time_cur.empty()) {
+        ROS_WARN("sendPic skipped because siteId, deviceId, airlineKey, or detectTimeCur from /airlineInfo is missing");
         HttpResult result;
         result.result_code = 3;
         return result;
@@ -584,7 +672,12 @@ HttpResult HttpClient::SendPicWithMission(int site_id,
 HttpResult HttpClient::SendDeviceState(const DeviceState& device_state) {
     int site_id = 0;
     int device_id = 0;
-    GetCurrentTargetIds(&site_id, &device_id);
+    if (!GetAirlineInfoTargetIds(&site_id, &device_id)) {
+        ROS_WARN("sendDeviceData skipped because siteId, deviceId, airlineKey, or detectTimeCur from /airlineInfo is missing");
+        HttpResult result;
+        result.result_code = 3;
+        return result;
+    }
 
     std::string path = "/sendDeviceData?siteId=" + std::to_string(site_id) +
                        "&deviceId=" + std::to_string(device_id);
@@ -604,8 +697,9 @@ HttpResult HttpClient::SendFlightStates(const std::vector<FlightState>& flight_s
     std::string detect_time_cur;
     GetCurrentMissionContext(&site_id, &device_id, &airline_key, &detect_time_cur);
 
-    if (airline_key.empty() || detect_time_cur.empty()) {
-        ROS_WARN("sendFlyData skipped because airlineKey or detectTimeCur from /airlineInfo is missing");
+    if (site_id <= 0 || device_id <= 0 ||
+        airline_key.empty() || detect_time_cur.empty()) {
+        ROS_WARN("sendFlyData skipped because siteId, deviceId, airlineKey, or detectTimeCur from /airlineInfo is missing");
         HttpResult result;
         result.result_code = 3;
         return result;
@@ -635,8 +729,9 @@ HttpResult HttpClient::SendErrorData(const ErrorData& error_data) {
     std::string detect_time_cur;
     GetCurrentMissionContext(&site_id, &device_id, &airline_key, &detect_time_cur);
 
-    if (airline_key.empty() || detect_time_cur.empty()) {
-        ROS_WARN("sendErrorData skipped because airlineKey or detectTimeCur from /airlineInfo is missing");
+    if (site_id <= 0 || device_id <= 0 ||
+        airline_key.empty() || detect_time_cur.empty()) {
+        ROS_WARN("sendErrorData skipped because siteId, deviceId, airlineKey, or detectTimeCur from /airlineInfo is missing");
         HttpResult result;
         result.result_code = 3;
         return result;
@@ -657,7 +752,12 @@ HttpResult HttpClient::SendErrorData(const ErrorData& error_data) {
 HttpResult HttpClient::SendTakeoffState(int takeoff_state) {
     int site_id = 0;
     int device_id = 0;
-    GetCurrentTargetIds(&site_id, &device_id);
+    if (!GetAirlineInfoTargetIds(&site_id, &device_id)) {
+        ROS_WARN("sendTakeoffState skipped because siteId, deviceId, airlineKey, or detectTimeCur from /airlineInfo is missing");
+        HttpResult result;
+        result.result_code = 3;
+        return result;
+    }
 
     std::string path = "/sendTakeoffState?siteId=" + std::to_string(site_id) +
                        "&deviceId=" + std::to_string(device_id) +
@@ -681,8 +781,9 @@ HttpResult HttpClient::SendFlyOverWithMission(int site_id,
                                               int device_id,
                                               const std::string& airline_key,
                                               const std::string& detect_time_cur) {
-    if (airline_key.empty() || detect_time_cur.empty()) {
-        ROS_WARN("sendFlyOver skipped because airlineKey or detectTimeCur from /airlineInfo is missing");
+    if (site_id <= 0 || device_id <= 0 ||
+        airline_key.empty() || detect_time_cur.empty()) {
+        ROS_WARN("sendFlyOver skipped because siteId, deviceId, airlineKey, or detectTimeCur from /airlineInfo is missing");
         HttpResult result;
         result.result_code = 3;
         return result;
@@ -711,8 +812,9 @@ HttpResult HttpClient::SendPicOverWithMission(int site_id,
                                               int device_id,
                                               const std::string& airline_key,
                                               const std::string& detect_time_cur) {
-    if (airline_key.empty() || detect_time_cur.empty()) {
-        ROS_WARN("sendPicOver skipped because airlineKey or detectTimeCur from /airlineInfo is missing");
+    if (site_id <= 0 || device_id <= 0 ||
+        airline_key.empty() || detect_time_cur.empty()) {
+        ROS_WARN("sendPicOver skipped because siteId, deviceId, airlineKey, or detectTimeCur from /airlineInfo is missing");
         HttpResult result;
         result.result_code = 3;
         return result;
@@ -730,7 +832,12 @@ HttpResult HttpClient::SendPicOverWithMission(int site_id,
 HttpResult HttpClient::AirlineSync() {
     int site_id = 0;
     int device_id = 0;
-    GetCurrentTargetIds(&site_id, &device_id);
+    if (!GetAirlineInfoTargetIds(&site_id, &device_id)) {
+        ROS_WARN("airlineSync skipped because siteId, deviceId, airlineKey, or detectTimeCur from /airlineInfo is missing");
+        HttpResult result;
+        result.result_code = 3;
+        return result;
+    }
 
     std::string path = "/airlineSync?siteId=" + std::to_string(site_id) +
                        "&deviceId=" + std::to_string(device_id);
@@ -1057,7 +1164,12 @@ bool HttpClient::HandleUploadImageBytes(indooruav_msgs::UploadImageBytes::Reques
                                         indooruav_msgs::UploadImageBytes::Response& res) {
     int site_id = 0;
     int device_id = 0;
-    ResolveTargetIdsForMission(req.airline_key, req.detect_time_cur, &site_id, &device_id);
+    if (!ResolveTargetIdsForMission(req.airline_key, req.detect_time_cur, &site_id, &device_id)) {
+        ROS_WARN("Failed to resolve siteId/deviceId from /airlineInfo for detectTimeCur=%s",
+                 req.detect_time_cur.c_str());
+        res.result_code = 3;
+        return true;
+    }
 
     const HttpResult result = SendPicBytesWithMission(site_id,
                                                       device_id,
