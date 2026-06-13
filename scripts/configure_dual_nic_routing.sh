@@ -115,6 +115,9 @@ else
 fi
 
 # Keep the main table biased toward Wi-Fi for the shared LAN subnet.
+# Delete kernel auto-routes first (metric 0) so they don't win.
+ip route del "$WLAN_NET" dev "$WLAN_IFACE" proto kernel 2>/dev/null || true
+ip route del "$ETH_NET" dev "$ETH_IFACE" proto kernel 2>/dev/null || true
 ip route replace "$WLAN_NET" dev "$WLAN_IFACE" scope link src "$WLAN_IP" metric "$WLAN_METRIC"
 ip route replace "$ETH_NET" dev "$ETH_IFACE" scope link src "$ETH_IP" metric "$ETH_METRIC"
 if [[ -n "$RADAR_IP" ]]; then

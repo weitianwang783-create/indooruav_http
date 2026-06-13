@@ -77,7 +77,12 @@ roslaunch indooruav_http bringup_indooruav_http.launch \
   server_config:=/path/to/http_server.yaml \
   client_config:=/path/to/http_client.yaml
 ```
-
+手动发布事件服务测试：
+rosservice call /indooruav_core/state_machine_event/takeoff_command
+rosservice call /indooruav_core/state_machine_event/check_passed
+rosservice call /indooruav_core/state_machine_event/takeoff_complete
+rosservice call /indooruav_core/state_machine_event/cruise_complete
+rosservice call /indooruav_core/state_machine_event/land_complete
 ### 3.2 单独启动 HTTP 服务端
 
 ```bash
@@ -131,6 +136,42 @@ rosrun indooruav_http indooruav_http_client \
   - 图片来源模式，可选 `local_fs` 或 `drone_sd_card`
 - `controller_upload_mission_media_service`
   - `drone_sd_card` 模式下调用的 controller service 名称
+
+### 3.4 雷达静态 IP 开机启动
+
+本仓库已包含系统服务模板和配置文件：
+
+- `config/radar-static-ip.service`
+- `config/radar-static-ip.env`
+- `scripts/configure_radar_static_ip.sh`
+
+运行以下命令即可把服务安装到系统并开启开机启动：
+
+```bash
+cd $(dirname "$(realpath "$0")")
+cd ..
+sudo bash scripts/install_radar_static_ip.sh
+```
+
+安装完成后，使用下面命令检查服务状态：
+
+```bash
+sudo systemctl status radar-static-ip.service
+```
+
+如果需要立即生效，可运行：
+
+```bash
+sudo systemctl start radar-static-ip.service
+```
+
+默认配置文件拷贝到：
+
+- `/etc/indooruav/radar-static-ip.env`
+- `/etc/systemd/system/radar-static-ip.service`
+- `/opt/indooruav/scripts/configure_radar_static_ip.sh`
+
+请根据实际机载电脑网口名称调整 `config/radar-static-ip.env` 中的 `ETH_IFACE` 和 IP 参数。
 
 当前可用 ROS service：
 

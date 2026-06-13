@@ -1,6 +1,6 @@
 # Parameters for indooruav_http_client (private namespace)
-server_ip: "127.0.0.1"
-server_port: 8080
+server_ip: "192.168.1.104"
+server_port: 7000
 site_id: 11
 device_id: 1
 device_state_interval: 30.0
