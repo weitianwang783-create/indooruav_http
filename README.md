@@ -1,5 +1,56 @@
 # indooruav_http 使用说明
 
+
+雷达静态IP需要手动开启脚本，命令为
+cd ~/Project/IndoorUavInspection2/catkin_ws/src/indooruav_http
+sudo bash scripts/configure_radar_static_ip.sh
+后期要设成一个systemd服务
+
+### 雷达静态 IP systemd 服务
+
+如果需要让雷达口 `eth0` 在开机时自动配置为静态 IP，可以使用仓库内提供的模板：
+
+- service 模板：`config/radar-static-ip.service`
+- 环境文件模板：`config/radar-static-ip.env`
+- 执行脚本：`scripts/configure_radar_static_ip.sh`
+
+推荐部署路径：
+
+```bash
+sudo mkdir -p /opt/indooruav/scripts /etc/indooruav
+sudo cp scripts/configure_radar_static_ip.sh /opt/indooruav/scripts/
+sudo chmod +x /opt/indooruav/scripts/configure_radar_static_ip.sh
+sudo cp config/radar-static-ip.env /etc/indooruav/radar-static-ip.env
+sudo cp config/radar-static-ip.service /etc/systemd/system/radar-static-ip.service
+```
+
+按现场情况修改环境文件：
+
+```bash
+sudoedit /etc/indooruav/radar-static-ip.env
+```
+
+默认值为：
+
+- `ETH_IFACE=eth0`
+- `RADAR_HOST_IP=192.168.10.50`
+- `RADAR_PREFIX_LEN=24`
+- `RADAR_DEVICE_IP=192.168.10.3`
+
+启用并立即执行：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now radar-static-ip.service
+```
+
+检查状态：
+
+```bash
+systemctl status radar-static-ip.service
+ip -4 addr show dev eth0
+ip route get 192.168.10.3 from 192.168.10.50
+```
 ## 1. 功能概述
 
 `indooruav_http` 包含两个 ROS 节点：
@@ -200,6 +251,54 @@ sudo systemctl start radar-static-ip.service
 - `1.9 sendFlyOver`
 - 图片上传
 - `1.11 sendPicOver`
+
+### 3.4 雷达静态 IP 开机启动
+
+本仓库已包含系统服务模板和配置文件：
+
+- `config/radar-static-ip.service`
+- `config/radar-static-ip.env`
+- `scripts/configure_radar_static_ip.sh`
+
+运行以下命令即可把服务安装到系统并开启开机启动：
+
+```bash
+cd $(dirname "$(realpath "$0")")
+cd ..
+sudo bash scripts/install_radar_static_ip.sh
+```
+
+安装完成后，使用下面命令检查服务状态：
+
+```bash
+sudo systemctl status radar-static-ip.service
+```
+
+如果需要立即生效，可运行：
+
+```bash
+sudo systemctl start radar-static-ip.service
+```
+
+默认配置文件拷贝到：
+
+- `/etc/indooruav/radar-static-ip.env`
+- `/etc/systemd/system/radar-static-ip.service`
+- `/opt/indooruav/scripts/configure_radar_static_ip.sh`
+
+请根据实际机载电脑网口名称调整 `config/radar-static-ip.env` 中的 `ETH_IFACE` 和 IP 参数。
+
+当前可用 ROS service：
+
+- `/indooruav_http/send_airline`
+- `/indooruav_http/send_pic`
+- `/indooruav_http/send_pic_over`
+- `/indooruav_http/send_fly_over`
+- `/indooruav_http/send_error_data`
+- `/indooruav_http/set_takeoff_state`
+- `/indooruav_http/airline_sync`
+- `/indooruav_http/run_post_land_workflow`
+- `/indooruav_http/upload_image_bytes`
 
 ## 4. 图片上传逻辑
 
