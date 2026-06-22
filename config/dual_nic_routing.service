@@ -1,7 +1,7 @@
 [Unit]
 Description=Dual NIC routing for radar + Wi-Fi coexistence
-After=network-pre.target
-Wants=network-pre.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
@@ -9,6 +9,7 @@ EnvironmentFile=/etc/indooruav/dual_nic_routing.env
 ExecStartPre=/bin/bash -c "ip link set ${ETH_IFACE} up && ip addr flush dev ${ETH_IFACE} scope global && ip addr add ${ETH_HOST_IP}/${ETH_PREFIX_LEN} dev ${ETH_IFACE}"
 ExecStart=/opt/indooruav/scripts/configure_dual_nic_routing.sh --eth-iface ${ETH_IFACE} --wlan-iface ${WLAN_IFACE} --radar-ip ${RADAR_IP}
 RemainAfterExit=yes
+TimeoutStartSec=30
 
 [Install]
 WantedBy=multi-user.target
