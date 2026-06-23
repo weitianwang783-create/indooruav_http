@@ -1,5 +1,7 @@
 string airline_key
 string airline_map
+float64 xscale
+float64 yscale
 string waypoint_list_json
 ---
 int32 result_code

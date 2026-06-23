@@ -40,12 +40,16 @@ struct Waypoint {
 struct Airline {
 	std::string airline_key;
 	std::string airline_map;
+	double xscale = 0.0;
+	double yscale = 0.0;
 	std::vector<Waypoint> waypoint_list;
 
 	static Airline FromJson(const json& j) {
 		Airline airline;
 		airline.airline_key = j.value("airlineKey", "");
 		airline.airline_map = j.value("airlineMap", "");
+		airline.xscale = j.value("xscale", 0.0);
+		airline.yscale = j.value("yscale", 0.0);
 		if (j.contains("waypointList") && j.at("waypointList").is_array()) {
 			for (const auto& item : j.at("waypointList")) {
 				airline.waypoint_list.push_back(Waypoint::FromJson(item));
@@ -62,6 +66,8 @@ struct Airline {
 		return json{
 			{"airlineKey", airline_key},
 			{"airlineMap", airline_map},
+			{"xscale", xscale},
+			{"yscale", yscale},
 			{"waypointList", list}
 		};
 	}

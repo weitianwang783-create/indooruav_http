@@ -3,6 +3,8 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
+#include <yaml-cpp/yaml.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -12,6 +14,7 @@
 #include <sstream>
 #include <unordered_map>
 
+#include <ros/package.h>
 #include <tf/transform_datatypes.h>
 
 namespace indooruav_http {
@@ -20,6 +23,8 @@ namespace {
 const char* kJsonContentType = "application/json";
 const char* kRunPostLandWorkflowService = "/indooruav_http/run_post_land_workflow";
 const char* kUploadImageBytesService = "/indooruav_http/upload_image_bytes";
+const char* kCacheAirlineMetaService = "/indooruav_http/cache_airline_meta";
+const char* kWaypointSaveProxyService = "indooruav_controller/waypoint_recorder/save";
 std::mutex g_upload_sequence_mutex;
 std::unordered_map<std::string, int> g_next_upload_sequence_by_detect_time;
 
@@ -48,6 +53,19 @@ std::string JoinPath(const std::string& left, const std::string& right) {
         return left + right;
     }
     return left + "/" + right;
+}
+
+std::string ResolveRecordedWaypointYamlPath(const std::string& configured_path) {
+    if (configured_path.empty() || configured_path.front() == '/') {
+        return configured_path;
+    }
+
+    const std::string package_path = ros::package::getPath("indooruav_waypoint");
+    if (package_path.empty()) {
+        return configured_path;
+    }
+
+    return JoinPath(package_path, configured_path);
 }
 }  // namespace
 
@@ -100,6 +118,19 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
     nh_private.param<std::string>("controller_upload_mission_media_service",
                                   controller_upload_mission_media_service_,
                                   "/indooruav_controller/controller_hardware/upload_mission_photos_from_sd");
+    nh_private.param<std::string>("waypoint_save_raw_service",
+                                  waypoint_save_raw_service_,
+                                  "indooruav_controller/waypoint_recorder/save_raw");
+    nh_private.param<std::string>("recorded_waypoint_yaml_path",
+                                  recorded_waypoint_yaml_path_,
+                                  "config/waypoints.yaml");
+    nh_private.param<double>("waypoint_send_retry_interval_sec",
+                             waypoint_send_retry_interval_sec_,
+                             3.0);
+    if (waypoint_send_retry_interval_sec_ < 0.5) {
+        waypoint_send_retry_interval_sec_ = 0.5;
+    }
+    recorded_waypoint_yaml_path_ = ResolveRecordedWaypointYamlPath(recorded_waypoint_yaml_path_);
 
     nh_private.param<int>("uav_state", current_device_state_.uav_state, 1);
     nh_private.param<int>("control_state", current_device_state_.control_state, 1);
@@ -113,6 +144,8 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
     SetupServices(nh);
     transfer_mission_media_client_ =
         nh.serviceClient<indooruav_msgs::TransferMissionMedia>(controller_upload_mission_media_service_);
+    waypoint_save_raw_client_ =
+        nh.serviceClient<std_srvs::Trigger>(waypoint_save_raw_service_);
 }
 
 HttpClient::~HttpClient() {
@@ -136,6 +169,11 @@ void HttpClient::StartTimers() {
         ros::Duration(takeoff_state_interval_),
         &HttpClient::TakeoffStateTimerCallback,
         this);
+
+    waypoint_send_retry_timer_ = nh_.createTimer(
+        ros::Duration(waypoint_send_retry_interval_sec_),
+        &HttpClient::WaypointSendRetryTimerCallback,
+        this);
 }
 
 void HttpClient::SetupSubscribers(ros::NodeHandle& nh) {
@@ -153,6 +191,10 @@ void HttpClient::SetupSubscribers(ros::NodeHandle& nh) {
 }
 
 void HttpClient::SetupServices(ros::NodeHandle& nh) {
+    cache_airline_meta_service_ = nh.advertiseService(
+        kCacheAirlineMetaService,
+        &HttpClient::HandleCacheAirlineMeta,
+        this);
     send_airline_service_ = nh.advertiseService(
         "/indooruav_http/send_airline",
         &HttpClient::HandleSendAirline,
@@ -160,6 +202,10 @@ void HttpClient::SetupServices(ros::NodeHandle& nh) {
     send_pic_service_ = nh.advertiseService(
         "/indooruav_http/send_pic",
         &HttpClient::HandleSendPic,
+        this);
+    waypoint_save_proxy_service_ = nh.advertiseService(
+        kWaypointSaveProxyService,
+        &HttpClient::HandleWaypointSaveProxy,
         this);
     upload_image_bytes_service_ = nh.advertiseService(
         kUploadImageBytesService,
@@ -561,6 +607,11 @@ void HttpClient::TakeoffStateTimerCallback(const ros::TimerEvent& event) {
     if (result.result_code != 1) {
         ROS_WARN("sendTakeoffState failed with resultCode=%d", result.result_code);
     }
+}
+
+void HttpClient::WaypointSendRetryTimerCallback(const ros::TimerEvent& event) {
+    (void)event;
+    TrySendPendingWaypointAirline("retry_timer");
 }
 
 HttpResult HttpClient::SendAirline(const Airline& airline) {
@@ -1028,6 +1079,121 @@ indooruav_msgs::TransferMissionMedia::Response HttpClient::TransferMissionMediaF
     return service.response;
 }
 
+bool HttpClient::BuildRecordedWaypointAirlineFromYaml(const std::string& airline_key,
+                                                  const std::string& airline_map,
+                                                  double xscale,
+                                                  double yscale,
+                                                  Airline* airline,
+                                                  size_t* manual_waypoint_count,
+                                                  std::string* error_message) const {
+    if (airline == nullptr || manual_waypoint_count == nullptr) {
+        if (error_message != nullptr) {
+            *error_message = "Invalid output pointer.";
+        }
+        return false;
+    }
+
+    try {
+        YAML::Node root = YAML::LoadFile(recorded_waypoint_yaml_path_);
+        const YAML::Node waypoints = root["waypoints"];
+        if (!waypoints || !waypoints.IsSequence()) {
+            if (error_message != nullptr) {
+                *error_message = "YAML missing 'waypoints' sequence.";
+            }
+            return false;
+        }
+
+        airline->airline_key = airline_key;
+        airline->airline_map = airline_map;
+        airline->xscale = xscale;
+        airline->yscale = yscale;
+        airline->waypoint_list.clear();
+        *manual_waypoint_count = 0;
+
+        for (std::size_t i = 0; i < waypoints.size(); ++i) {
+            const YAML::Node node = waypoints[i];
+            const bool stop = node["stop"] ? node["stop"].as<bool>() : false;
+            if (!stop) {
+                continue;
+            }
+
+            Waypoint waypoint;
+            waypoint.waypointx = node["x"].as<double>();
+            waypoint.waypointy = node["y"].as<double>();
+            waypoint.waypointz = node["z"].as<double>();
+            waypoint.angle = node["yaw_deg"].as<double>();
+            waypoint.distance = 0.0;
+            airline->waypoint_list.push_back(waypoint);
+            ++(*manual_waypoint_count);
+        }
+
+        return true;
+    } catch (const YAML::Exception& e) {
+        if (error_message != nullptr) {
+            *error_message = e.what();
+        }
+        return false;
+    } catch (const std::exception& e) {
+        if (error_message != nullptr) {
+            *error_message = e.what();
+        }
+        return false;
+    }
+}
+
+bool HttpClient::TrySendPendingWaypointAirline(const char* trigger_source) {
+    Airline airline;
+    size_t manual_waypoint_count = 0;
+    std::string error_message;
+    uint64_t generation = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(waypoint_airline_mutex_);
+        if (!pending_waypoint_airline_send_) {
+            return true;
+        }
+        if (!has_cached_waypoint_airline_meta_) {
+            ROS_WARN_THROTTLE(5.0, "Waypoint send pending but airline metadata is not cached yet");
+            return false;
+        }
+
+        generation = pending_waypoint_airline_generation_;
+        if (!BuildRecordedWaypointAirlineFromYaml(cached_waypoint_airline_key_,
+                                                  cached_waypoint_airline_map_,
+                                                  cached_waypoint_xscale_,
+                                                  cached_waypoint_yscale_,
+                                                  &airline,
+                                                  &manual_waypoint_count,
+                                                  &error_message)) {
+            ROS_WARN_THROTTLE(5.0, "Failed to build recorded waypoint airline from [%s]: %s",
+                              recorded_waypoint_yaml_path_.c_str(),
+                              error_message.c_str());
+            return false;
+        }
+    }
+
+    HttpResult result = SendAirline(airline);
+    if (result.result_code != 1) {
+        ROS_WARN("Waypoint auto sendAirline failed from trigger [%s] with resultCode=%d",
+                 trigger_source == nullptr ? "unknown" : trigger_source,
+                 result.result_code);
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(waypoint_airline_mutex_);
+        if (pending_waypoint_airline_send_ && pending_waypoint_airline_generation_ == generation) {
+            pending_waypoint_airline_send_ = false;
+        }
+    }
+
+    ROS_INFO("Waypoint auto sendAirline succeeded from trigger [%s], manual waypoint count=%zu, yaml=%s",
+             trigger_source == nullptr ? "unknown" : trigger_source,
+             manual_waypoint_count,
+             recorded_waypoint_yaml_path_.c_str());
+    return true;
+}
+
 void HttpClient::StartPostLandWorkflow() {
     if (post_land_workflow_thread_.joinable()) {
         post_land_workflow_thread_.join();
@@ -1124,11 +1290,69 @@ void HttpClient::RunPostLandWorkflow() {
     ROS_INFO("Post-land workflow finished for detectTimeCur=%s", detect_time_cur.c_str());
 }
 
+bool HttpClient::HandleCacheAirlineMeta(indooruav_http::CacheAirlineMeta::Request& req,
+                                    indooruav_http::CacheAirlineMeta::Response& res) {
+    if (req.airline_key.empty()) {
+        res.result_code = 3;
+        ROS_WARN("cache_airline_meta rejected because airline_key is empty");
+        return true;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(waypoint_airline_mutex_);
+        cached_waypoint_airline_key_ = req.airline_key;
+        cached_waypoint_airline_map_ = req.airline_map;
+        cached_waypoint_xscale_ = req.xscale;
+        cached_waypoint_yscale_ = req.yscale;
+        has_cached_waypoint_airline_meta_ = true;
+    }
+
+    res.result_code = 1;
+    ROS_INFO("Cached waypoint airline metadata: airlineKey=%s, xscale=%.3f, yscale=%.3f",
+             req.airline_key.c_str(),
+             req.xscale,
+             req.yscale);
+    TrySendPendingWaypointAirline("cache_airline_meta");
+    return true;
+}
+
+bool HttpClient::HandleWaypointSaveProxy(std_srvs::Trigger::Request& req,
+                                         std_srvs::Trigger::Response& res) {
+    (void)req;
+    std_srvs::Trigger raw_service;
+    if (!waypoint_save_raw_client_.call(raw_service)) {
+        res.success = false;
+        res.message = "Failed to call raw waypoint save service: " + waypoint_save_raw_service_;
+        ROS_WARN("%s", res.message.c_str());
+        return true;
+    }
+
+    res.success = raw_service.response.success;
+    res.message = raw_service.response.message;
+    if (!raw_service.response.success) {
+        ROS_WARN("Raw waypoint save service reported failure: %s", res.message.c_str());
+        return true;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(waypoint_airline_mutex_);
+        pending_waypoint_airline_send_ = true;
+        ++pending_waypoint_airline_generation_;
+    }
+
+    ROS_INFO("Waypoint save proxy accepted saved waypoint file [%s], scheduling automatic sendAirline",
+             recorded_waypoint_yaml_path_.c_str());
+    TrySendPendingWaypointAirline("waypoint_save_proxy");
+    return true;
+}
+
 bool HttpClient::HandleSendAirline(indooruav_http::SendAirline::Request& req,
                                    indooruav_http::SendAirline::Response& res) {
     Airline airline;
     airline.airline_key = req.airline_key;
     airline.airline_map = req.airline_map;
+    airline.xscale = req.xscale;
+    airline.yscale = req.yscale;
     try {
         json list = json::parse(req.waypoint_list_json);
         if (!list.is_array()) {

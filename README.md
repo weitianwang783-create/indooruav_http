@@ -235,6 +235,8 @@ sudo systemctl start radar-static-ip.service
 - `/indooruav_http/airline_sync`
 - `/indooruav_http/run_post_land_workflow`
 - `/indooruav_http/upload_image_bytes`
+- `/indooruav_http/cache_airline_meta`
+- `indooruav_controller/waypoint_recorder/save`
 
 ### 3.4 状态机自动触发链路
 
@@ -299,6 +301,8 @@ sudo systemctl start radar-static-ip.service
 - `/indooruav_http/airline_sync`
 - `/indooruav_http/run_post_land_workflow`
 - `/indooruav_http/upload_image_bytes`
+- `/indooruav_http/cache_airline_meta`
+- `indooruav_controller/waypoint_recorder/save`
 
 ## 4. 图片上传逻辑
 
@@ -397,6 +401,9 @@ device_id: 1
 post_land_image_root_dir: "/tmp/indooruav_post_land_images"
 post_land_image_source_mode: "local_fs"
 controller_upload_mission_media_service: "/indooruav_controller/controller_hardware/upload_mission_photos_from_sd"
+waypoint_save_raw_service: "indooruav_controller/waypoint_recorder/save_raw"
+recorded_waypoint_yaml_path: "config/waypoints.yaml"
+waypoint_send_retry_interval_sec: 3.0
 ```
 
 ### 5.2 indooruav_controller/config/config.yaml
@@ -622,6 +629,9 @@ rosservice call /indooruav_core/state_machine_event/land_complete
 ```yaml
 post_land_image_source_mode: "drone_sd_card"
 controller_upload_mission_media_service: "/indooruav_controller/controller_hardware/upload_mission_photos_from_sd"
+waypoint_save_raw_service: "indooruav_controller/waypoint_recorder/save_raw"
+recorded_waypoint_yaml_path: "config/waypoints.yaml"
+waypoint_send_retry_interval_sec: 3.0
 ```
 
 - `indooruav_controller/config/config.yaml`

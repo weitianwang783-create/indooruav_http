@@ -20,6 +20,8 @@ file 中航点JSON文件中字段格式说明：
 | --- | --- | --- |
 | airlineKey | String | 航线唯一标识 |
 | airlineMap | String | 航线地图，base64图片，如果http图片地址也可以 |
+| xscale | double |x轴与地图像素的比例，比如15.8，表示坐标：地图像素为15.8:1 |
+| yscale | double |y轴与地图像素的比例，比如15.8，表示坐标：地图像素为15.8:1 |
 | waypointList | 集合 | 航点集合 |
 
 waypointList字段格式说明：

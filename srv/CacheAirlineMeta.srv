@@ -1,0 +1,6 @@
+string airline_key
+string airline_map
+float64 xscale
+float64 yscale
+---
+int32 result_code
