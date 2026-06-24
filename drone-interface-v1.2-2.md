@@ -22,6 +22,8 @@ file 中航点JSON文件中字段格式说明：
 | airlineMap | String | 航线地图，base64图片，如果http图片地址也可以 |
 | xscale | double |x轴与地图像素的比例，比如15.8，表示坐标：地图像素为15.8:1 |
 | yscale | double |y轴与地图像素的比例，比如15.8，表示坐标：地图像素为15.8:1 |
+| xzero | double |原点在地图X轴的像素位置 |
+| yzero | double |原点在地图Y轴的像素位置 |
 | waypointList | 集合 | 航点集合 |
 
 waypointList字段格式说明：
@@ -36,7 +38,7 @@ waypointList字段格式说明：
 
 JSON示例：
 
-| { "airlineKey": "AAAAAAAAA", "airlineMap": "AAAAAAAAA", "waypointList": [ { "distance": 1, "angle": 1, "waypointx": 1, "waypointy": 1, "waypointz": 1 }, { "distance": 2, "angle": 2, "waypointx": 2, "waypointy": 2, "waypointz": 2 }, { "distance": 3, "angle": 3, "waypointx": 3, "waypointy": 3, "waypointz": 3 } ] } |
+| { "airlineKey": "AAAAAAAAA", "airlineMap": "AAAAAAAAA", "xscale": 15.8, "yscale": 15.8, "xzero": 0.0, "yzero": 0.0, "waypointList": [ { "distance": 1, "angle": 1, "waypointx": 1, "waypointy": 1, "waypointz": 1 }, { "distance": 2, "angle": 2, "waypointx": 2, "waypointy": 2, "waypointz": 2 }, { "distance": 3, "angle": 3, "waypointx": 3, "waypointy": 3, "waypointz": 3 } ] } |
 | --- |
 
 返回值对象属性说明：
@@ -75,15 +77,11 @@ file 中设备状态JSON文件中字段格式说明：（设备状态需可设�
 | batteryRssi | double | 无人机信号强度：0.0%-100.0%，精度0.00 |
 | batteryVolt | double | 无人机电池电压，单位V，精度0.00 |
 | batteryCycleNum | int | 无人机电池循环次数 |
-| droneNestState | int | 机巢状态：1在线，0离线 |
-| putterLrState | int | 左右推杆状态：1松开，0 闭合 |
-| putterBaState | int | 前后推杆状态：1松开，0 闭合 |
-| putterState | int | 推杆整体状态：1松开，0 闭合 |
 |  |  | (如果有其他类型，后续继续添加) |
 
 JSON示例：
 
-| { "uavState": 1, "controlState": 1, "controlSoc": 90.1, "controlRssi": 99.9, "batteryTemp": 50.5, "batterySoc": 90.9, "batteryRssi": 99.9, "batteryVolt": 40.1, "batteryCycleNum": 1, "droneNestState": 1, "putterLrState": 1, "putterBaState": 1, "putterState": 1 } |
+| { "uavState": 1, "controlState": 1, "controlSoc": 90.1, "controlRssi": 99.9, "batteryTemp": 50.5, "batterySoc": 90.9, "batteryRssi": 99.9, "batteryVolt": 40.1, "batteryCycleNum": 1} |
 | --- |
 
 返回值对象属性说明：
@@ -154,7 +152,7 @@ JSON示例：
 返回值示例：
 
 | { "resultCode": 1 } |
-| --- |
+| --- |吗
 
 ## 1.4、发送报警、安全信息
 
@@ -264,7 +262,7 @@ field name: file
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `siteId` | int | 站点编号 |
+| `siteId` | int | 站点编号 |ma
 | `deviceId` | int | 设备编号 |
 | `airlineKey` | string | 当前任务标识 |
 | `detectTimeCur` | string | 当前检测时间 |
