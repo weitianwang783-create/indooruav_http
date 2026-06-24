@@ -181,6 +181,8 @@ private:
 	double waypoint_poll_interval_sec_ = 5.0;
 	double default_waypoint_xscale_ = 15.8;
 	double default_waypoint_yscale_ = 15.8;
+	double default_waypoint_xzero_ = 0.0;
+	double default_waypoint_yzero_ = 0.0;
 	std::string waypoint_map2d_dir_;
 	std::string ftp_server_ip_;
 	int ftp_server_port_ = 21;

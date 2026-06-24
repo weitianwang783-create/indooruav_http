@@ -124,6 +124,12 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
     nh_private.param<double>("default_waypoint_yscale",
                              default_waypoint_yscale_,
                              15.8);
+    nh_private.param<double>("default_waypoint_xzero",
+                             default_waypoint_xzero_,
+                             0.0);
+    nh_private.param<double>("default_waypoint_yzero",
+                             default_waypoint_yzero_,
+                             0.0);
     nh_private.param<std::string>("waypoint_map2d_dir",
                                   waypoint_map2d_dir_,
                                   "");
@@ -291,12 +297,12 @@ void HttpClient::UpdateDerivedDeviceState() {
         return;
     }
 
-    int next_uav_state = 0;
-    if (uav_online_timeout_sec_ <= 0.0) {
-        next_uav_state = 1;
-    } else if (!last_telemetry_time_.isZero()) {
+    int next_uav_state = 1;
+    if (uav_online_timeout_sec_ > 0.0 && !last_telemetry_time_.isZero()) {
         const double silence_sec = (ros::Time::now() - last_telemetry_time_).toSec();
-        next_uav_state = silence_sec <= uav_online_timeout_sec_ ? 1 : 0;
+        if (silence_sec > uav_online_timeout_sec_) {
+            next_uav_state = 0;
+        }
     }
 
     if (current_device_state_.uav_state != next_uav_state) {
@@ -763,12 +769,7 @@ HttpResult HttpClient::SendPicWithMission(int site_id,
 HttpResult HttpClient::SendDeviceState(const DeviceState& device_state) {
     int site_id = 0;
     int device_id = 0;
-    if (!GetAirlineInfoTargetIds(&site_id, &device_id)) {
-        ROS_WARN("sendDeviceData skipped because siteId, deviceId, airlineKey, or detectTimeCur from /airlineInfo is missing");
-        HttpResult result;
-        result.result_code = 3;
-        return result;
-    }
+    GetCurrentTargetIds(&site_id, &device_id);
 
     std::string path = "/sendDeviceData?siteId=" + std::to_string(site_id) +
                        "&deviceId=" + std::to_string(device_id);
@@ -843,12 +844,7 @@ HttpResult HttpClient::SendErrorData(const ErrorData& error_data) {
 HttpResult HttpClient::SendTakeoffState(int takeoff_state) {
     int site_id = 0;
     int device_id = 0;
-    if (!GetAirlineInfoTargetIds(&site_id, &device_id)) {
-        ROS_WARN("sendTakeoffState skipped because siteId, deviceId, airlineKey, or detectTimeCur from /airlineInfo is missing");
-        HttpResult result;
-        result.result_code = 3;
-        return result;
-    }
+    GetCurrentTargetIds(&site_id, &device_id);
 
     std::string path = "/sendTakeoffState?siteId=" + std::to_string(site_id) +
                        "&deviceId=" + std::to_string(device_id) +
@@ -1157,6 +1153,8 @@ bool HttpClient::BuildRecordedWaypointAirlineFromYaml(const std::string& yaml_pa
         }
         airline->xscale = default_waypoint_xscale_;
         airline->yscale = default_waypoint_yscale_;
+        airline->xzero = default_waypoint_xzero_;
+        airline->yzero = default_waypoint_yzero_;
         airline->waypoint_list.clear();
         *manual_waypoint_count = 0;
 
@@ -1485,6 +1483,8 @@ bool HttpClient::HandleSendAirline(indooruav_http::SendAirline::Request& req,
     airline.airline_map = req.airline_map;
     airline.xscale = req.xscale;
     airline.yscale = req.yscale;
+    airline.xzero = req.xzero;
+    airline.yzero = req.yzero;
     try {
         json list = json::parse(req.waypoint_list_json);
         if (!list.is_array()) {
