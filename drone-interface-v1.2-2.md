@@ -154,7 +154,7 @@ JSON示例：
 返回值示例：
 
 | { "resultCode": 1 } |
-| --- |
+| --- |吗
 
 ## 1.4、发送报警、安全信息
 
@@ -264,7 +264,7 @@ field name: file
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `siteId` | int | 站点编号 |
+| `siteId` | int | 站点编号 |ma
 | `deviceId` | int | 设备编号 |
 | `airlineKey` | string | 当前任务标识 |
 | `detectTimeCur` | string | 当前检测时间 |

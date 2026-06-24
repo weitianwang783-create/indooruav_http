@@ -1,5 +1,9 @@
 # indooruav_http 使用说明
 
+换前端电脑同步现在所有航线的命令：
+rosservice call /indooruav_http/resend_all_airlines "{}"
+
+
 
 雷达静态IP需要手动开启脚本，命令为
 cd ~/Project/IndoorUavInspection2/catkin_ws/src/indooruav_http

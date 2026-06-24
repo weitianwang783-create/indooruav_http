@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <ctime>
 #include <deque>
 #include <map>
 #include <memory>
@@ -70,7 +71,7 @@ private:
 	void DeviceStateTimerCallback(const ros::TimerEvent& event);
 	void FlightStateTimerCallback(const ros::TimerEvent& event);
 	void TakeoffStateTimerCallback(const ros::TimerEvent& event);
-	void WaypointSendRetryTimerCallback(const ros::TimerEvent& event);
+	void WaypointPollTimerCallback(const ros::TimerEvent& event);
 
 	HttpResult SendAirline(const Airline& airline);
 	HttpResult SendPic(const std::string& image_path);
@@ -123,14 +124,13 @@ private:
 	indooruav_msgs::TransferMissionMedia::Response TransferMissionMediaFromController(
 		const std::string& airline_key,
 		const std::string& detect_time_cur);
-	bool BuildRecordedWaypointAirlineFromYaml(const std::string& airline_key,
-							  const std::string& airline_map,
-							  double xscale,
-							  double yscale,
+	bool BuildRecordedWaypointAirlineFromYaml(const std::string& yaml_path,
 							  Airline* airline,
 							  size_t* manual_waypoint_count,
 							  std::string* error_message) const;
-	bool TrySendPendingWaypointAirline(const char* trigger_source);
+	void ScanAndSendWaypointAirlines();
+	bool TrySendWaypointAirlineFromFile(const std::string& yaml_path, std::time_t current_mtime);
+	bool FtpUploadMapImage(const std::string& map_name);
 	void StartPostLandWorkflow();
 	void RunPostLandWorkflow();
 
@@ -156,6 +156,8 @@ private:
 						   indooruav_http::AirlineSync::Response& res);
 	bool HandleRunPostLandWorkflow(std_srvs::Empty::Request& req,
 								   std_srvs::Empty::Response& res);
+	bool HandleResendAllAirlines(std_srvs::Empty::Request& req,
+								 std_srvs::Empty::Response& res);
 
 private:
 	ros::NodeHandle& nh_;
@@ -174,8 +176,20 @@ private:
 	std::string post_land_image_source_mode_;
 	std::string controller_upload_mission_media_service_;
 	std::string waypoint_save_raw_service_;
-	std::string recorded_waypoint_yaml_path_;
-	double waypoint_send_retry_interval_sec_ = 3.0;
+
+	std::string waypoint_yaml_dir_;
+	double waypoint_poll_interval_sec_ = 5.0;
+	double default_waypoint_xscale_ = 15.8;
+	double default_waypoint_yscale_ = 15.8;
+	std::string waypoint_map2d_dir_;
+	std::string ftp_server_ip_;
+	int ftp_server_port_ = 21;
+	std::string ftp_user_;
+	std::string ftp_password_;
+	std::string ftp_remote_map_dir_;
+	std::map<std::string, std::time_t> waypoint_file_mtime_store_;
+	std::mutex waypoint_poll_mutex_;
+	ros::Timer waypoint_poll_timer_;
 
 	std::unique_ptr<httplib::Client> client_;
 	std::mutex http_mutex_;
@@ -214,14 +228,6 @@ private:
 
 	int takeoff_state_ = 1;
 	std::mutex takeoff_mutex_;
-	std::string cached_waypoint_airline_key_;
-	std::string cached_waypoint_airline_map_;
-	double cached_waypoint_xscale_ = 0.0;
-	double cached_waypoint_yscale_ = 0.0;
-	bool has_cached_waypoint_airline_meta_ = false;
-	bool pending_waypoint_airline_send_ = false;
-	uint64_t pending_waypoint_airline_generation_ = 0;
-	std::mutex waypoint_airline_mutex_;
 
 	ros::Subscriber battery_sub_;
 	ros::Subscriber odom_sub_;
@@ -236,7 +242,6 @@ private:
 	ros::Timer device_state_timer_;
 	ros::Timer flight_state_timer_;
 	ros::Timer takeoff_state_timer_;
-	ros::Timer waypoint_send_retry_timer_;
 
 	ros::ServiceServer cache_airline_meta_service_;
 	ros::ServiceServer send_airline_service_;
@@ -249,6 +254,7 @@ private:
 	ros::ServiceServer send_pic_over_service_;
 	ros::ServiceServer airline_sync_service_;
 	ros::ServiceServer run_post_land_workflow_service_;
+	ros::ServiceServer resend_all_airlines_service_;
 	ros::ServiceClient waypoint_save_raw_client_;
 	ros::ServiceClient transfer_mission_media_client_;
 
