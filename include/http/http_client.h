@@ -13,6 +13,7 @@
 #include <vector>
 
 #include <ros/ros.h>
+#include <geometry_msgs/Point.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/BatteryState.h>
@@ -61,6 +62,7 @@ private:
 
 	void BatteryCallback(const sensor_msgs::BatteryState::ConstPtr& msg);
 	void OdomCallback(const nav_msgs::Odometry::ConstPtr& msg);
+	void OdomPxCallback(const geometry_msgs::Point::ConstPtr& msg);
 	void GimbalCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
 	void DetectionCallback(const std_msgs::String::ConstPtr& msg);
 	void AirlineInfoCallback(const std_msgs::String::ConstPtr& msg);
@@ -124,6 +126,7 @@ private:
 	indooruav_msgs::TransferMissionMedia::Response TransferMissionMediaFromController(
 		const std::string& airline_key,
 		const std::string& detect_time_cur);
+	void FillWaypointPxPy(Waypoint& waypoint) const;
 	bool BuildRecordedWaypointAirlineFromYaml(const std::string& yaml_path,
 							  Airline* airline,
 							  size_t* manual_waypoint_count,
@@ -200,7 +203,7 @@ private:
 
 	DeviceState current_device_state_;
 	std::deque<FlightState> flight_state_buffer_;
-	std::mutex buffer_mutex_;
+	mutable std::mutex buffer_mutex_;
 	ros::Time last_telemetry_time_;
 
 	ros::Time last_sample_time_;
@@ -208,6 +211,8 @@ private:
 	double gimbal_roll_ = 0.0;
 	double gimbal_pitch_ = 0.0;
 	double gimbal_yaw_ = 0.0;
+	double odom_px_ = 0.0;
+	double odom_py_ = 0.0;
 	int pantograph_is_ = 0;
 	int abnormal_is_ = 0;
 	double pantograph_locx_ = 0.0;
@@ -233,6 +238,7 @@ private:
 
 	ros::Subscriber battery_sub_;
 	ros::Subscriber odom_sub_;
+	ros::Subscriber odom_px_sub_;
 	ros::Subscriber odom_fallback_sub_;
 	ros::Subscriber gimbal_sub_;
 	ros::Subscriber detection_sub_;
@@ -266,6 +272,7 @@ private:
 	std::string takeoff_state_topic_;
 	std::string battery_topic_;
 	std::string odom_topic_;
+	std::string odom_px_topic_;
 	std::string odom_fallback_topic_;
 	std::string gimbal_topic_;
 	std::string detection_topic_;
