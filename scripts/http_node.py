@@ -45,13 +45,16 @@ def send_airline():
         airline_map = route_data.get('airlineMap', '')
         xscale = route_data.get('xscale', 0.0)
         yscale = route_data.get('yscale', 0.0)
+        xzero = route_data.get('xzero', 0.0)
+        yzero = route_data.get('yzero', 0.0)
+        angle = route_data.get('angle', 0.0)
         waypoint_list = route_data.get('waypointList', [])
 
         # 调用ROS服务通知系统其他节点航线信息
         rospy.wait_for_service('/indooruav/send_airline', timeout=2.0)
         airline_srv = rospy.ServiceProxy('/indooruav/send_airline', SendAirline)
-        
-        resp = airline_srv(airline_key, airline_map, xscale, yscale, json.dumps(waypoint_list))
+
+        resp = airline_srv(airline_key, airline_map, xscale, yscale, xzero, yzero, angle, json.dumps(waypoint_list))
         
         return jsonify({"resultCode": resp.result_code})
 

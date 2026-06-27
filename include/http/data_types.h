@@ -10,6 +10,8 @@ namespace indooruav_http {
 using json = nlohmann::json;
 
 struct Waypoint {
+	double px = 0.0;
+	double py = 0.0;
 	double waypointx = 0.0;
 	double waypointy = 0.0;
 	double waypointz = 0.0;
@@ -18,6 +20,8 @@ struct Waypoint {
 
 	static Waypoint FromJson(const json& j) {
 		Waypoint wp;
+		wp.px = j.value("px", 0.0);
+		wp.py = j.value("py", 0.0);
 		wp.waypointx = j.value("waypointx", 0.0);
 		wp.waypointy = j.value("waypointy", 0.0);
 		wp.waypointz = j.value("waypointz", 0.0);
@@ -28,6 +32,8 @@ struct Waypoint {
 
 	json ToJson() const {
 		return json{
+			{"px", px},
+			{"py", py},
 			{"waypointx", waypointx},
 			{"waypointy", waypointy},
 			{"waypointz", waypointz},
@@ -44,6 +50,7 @@ struct Airline {
 	double yscale = 0.0;
 	double xzero = 0.0;
 	double yzero = 0.0;
+	double angle = 0.0;
 	std::vector<Waypoint> waypoint_list;
 
 	static Airline FromJson(const json& j) {
@@ -54,6 +61,7 @@ struct Airline {
 		airline.yscale = j.value("yscale", 0.0);
 		airline.xzero = j.value("xzero", 0.0);
 		airline.yzero = j.value("yzero", 0.0);
+		airline.angle = j.value("angle", 0.0);
 		if (j.contains("waypointList") && j.at("waypointList").is_array()) {
 			for (const auto& item : j.at("waypointList")) {
 				airline.waypoint_list.push_back(Waypoint::FromJson(item));
@@ -74,6 +82,7 @@ struct Airline {
 			{"yscale", yscale},
 			{"xzero", xzero},
 			{"yzero", yzero},
+			{"angle", angle},
 			{"waypointList", list}
 		};
 	}
@@ -127,6 +136,8 @@ struct FlightState {
 	double abnormal_locx = 0.0;
 	double abnormal_locy = 0.0;
 	double abnormal_locz = 0.0;
+	double px = 0.0;
+	double py = 0.0;
 
 	json ToJson() const {
 		return json{
