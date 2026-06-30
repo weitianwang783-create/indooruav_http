@@ -4,6 +4,7 @@ float64 xscale
 float64 yscale
 float64 xzero
 float64 yzero
+float64 angle
 string waypoint_list_json
 ---
 int32 result_code
