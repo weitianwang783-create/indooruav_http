@@ -7,9 +7,11 @@
 #include <thread>
 #include <unordered_map>
 
+#include <ros/package.h>
 #include <ros/ros.h>
 #include <std_msgs/String.h>
 #include <std_srvs/Empty.h>
+#include <yaml-cpp/yaml.h>
 
 #include <http/httplib/httplib.h>
 

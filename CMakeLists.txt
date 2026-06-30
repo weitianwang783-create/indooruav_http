@@ -59,7 +59,7 @@ add_executable(indooruav_http_client
 add_dependencies(indooruav_http_server ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 add_dependencies(indooruav_http_client ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
-target_link_libraries(indooruav_http_server ${catkin_LIBRARIES})
+target_link_libraries(indooruav_http_server ${catkin_LIBRARIES} ${YAML_CPP_LIBRARIES})
 target_link_libraries(indooruav_http_client ${catkin_LIBRARIES} ${YAML_CPP_LIBRARIES})
 
 install(TARGETS indooruav_http_server indooruav_http_client

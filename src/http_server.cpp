@@ -1,12 +1,76 @@
 #include "http/http_server.h"
 
 #include <chrono>
+#include <fstream>
 #include <nlohmann/json.hpp>
+#include <sstream>
 
 namespace indooruav_http {
 
 namespace {
 const char* kJsonContentType = "application/json";
+
+std::string ReadYamlValue(const std::string& file_path, const std::string& key) {
+    try {
+        YAML::Node root = YAML::LoadFile(file_path);
+        if (root[key]) {
+            return root[key].as<std::string>();
+        }
+    } catch (const std::exception& e) {
+        ROS_ERROR("Failed to read YAML key '%s' from %s: %s",
+                  key.c_str(), file_path.c_str(), e.what());
+    }
+    return "";
+}
+
+bool UpdateYamlValue(const std::string& file_path, const std::string& key,
+                     const std::string& new_value) {
+    std::ifstream in(file_path);
+    if (!in.is_open()) {
+        ROS_ERROR("Failed to open %s for update", file_path.c_str());
+        return false;
+    }
+
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(in, line)) {
+        lines.push_back(line);
+    }
+    in.close();
+
+    const std::string needle = key + ":";
+    bool found = false;
+    for (auto& l : lines) {
+        if (l.find(needle) != std::string::npos) {
+            size_t colon = l.find(':');
+            if (colon != std::string::npos) {
+                size_t val_start = l.find_first_not_of(" \t", colon + 1);
+                if (val_start == std::string::npos) val_start = colon + 1;
+                l = l.substr(0, val_start) + new_value;
+                found = true;
+                break;
+            }
+        }
+    }
+
+    if (!found) {
+        ROS_ERROR("Key '%s' not found in %s", key.c_str(), file_path.c_str());
+        return false;
+    }
+
+    std::ofstream out(file_path, std::ios::trunc);
+    if (!out.is_open()) {
+        ROS_ERROR("Failed to write %s", file_path.c_str());
+        return false;
+    }
+    for (size_t i = 0; i < lines.size(); ++i) {
+        out << lines[i];
+        if (i + 1 < lines.size()) out << "\n";
+    }
+    out.close();
+    return true;
+}
+
 }
 
 // 构造HTTP服务端并初始化发布者/服务客户端/路由
@@ -154,6 +218,42 @@ void HttpServer::HandleAirlineInfo(const httplib::Request& req, httplib::Respons
         SendResult(res, 3);
         return;
     }
+
+    // 根据 airlineKey 查找对应的航线文件并更新配置
+    const std::string waypoint_pkg = ros::package::getPath("indooruav_waypoint");
+    const std::string waypoint_file = waypoint_pkg + "/waypoints/" + airline_key + ".yaml";
+    {
+        std::ifstream check(waypoint_file);
+        if (!check.is_open()) {
+            ROS_ERROR("Waypoint file not found: %s", waypoint_file.c_str());
+            SendResult(res, 2);
+            return;
+        }
+    }
+
+    const std::string map3d_name = ReadYamlValue(waypoint_file, "map3d_name");
+    if (map3d_name.empty()) {
+        ROS_ERROR("map3d_name not found in %s", waypoint_file.c_str());
+        SendResult(res, 2);
+        return;
+    }
+
+    const std::string config_yaml = waypoint_pkg + "/config/config.yaml";
+    const std::string localize_yaml = ros::package::getPath("fastlio") + "/config/localize.yaml";
+
+    if (!UpdateYamlValue(config_yaml, "waypoints_file_path", "waypoints/" + airline_key + ".yaml")) {
+        ROS_ERROR("Failed to update waypoints_file_path in %s", config_yaml.c_str());
+        SendResult(res, 2);
+        return;
+    }
+    ROS_INFO("Updated waypoints_file_path -> waypoints/%s.yaml", airline_key.c_str());
+
+    if (!UpdateYamlValue(localize_yaml, "pcd_name", map3d_name + ".pcd")) {
+        ROS_ERROR("Failed to update pcd_name in %s", localize_yaml.c_str());
+        SendResult(res, 2);
+        return;
+    }
+    ROS_INFO("Updated pcd_name -> %s.pcd", map3d_name.c_str());
 
     nlohmann::json payload = {
         {"siteId", site_id},
