@@ -128,6 +128,7 @@ def send_fly_data_task():
             payload = [{
                 "timeStamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
                 "positionx": 11.1, "positiony": 22.2, "positionz": 33.3,
+                "px": 0.0, "py": 0.0,
                 "attitudeRoll": 11.4, "attitudePitch": 22.5, "attitudeYaw": 33.6,
                 "horizontalSpeed": 20.7, "verticalSpeed": 1.8, "lineType": 1,
                 "poseAngleRoll": 11.9, "poseAnglePitch": 22.1, "poseAngleYaw": 33.2,

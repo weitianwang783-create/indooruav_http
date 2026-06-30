@@ -41,7 +41,7 @@ waypointList字段格式说明：
 
 JSON示例：
 
-| { "airlineKey": "AAAAAAAAA", "airlineMap": "AAAAAAAAA", "xscale": 15.8, "yscale": 15.8, "xzero": 0.0, "yzero": 0.0, "waypointList": [ { "distance": 1, "angle": 1, "waypointx": 1, "waypointy": 1, "waypointz": 1 }, { "distance": 2, "angle": 2, "waypointx": 2, "waypointy": 2, "waypointz": 2 }, { "distance": 3, "angle": 3, "waypointx": 3, "waypointy": 3, "waypointz": 3 } ] } |
+| { "airlineKey": "AAAAAAAAA", "airlineMap": "/P_P/<map_name>.png", "xscale": 15.8, "yscale": 15.8, "xzero": 0.0, "yzero": 0.0, "waypointList": [ { "distance": 1, "angle": 1, "waypointx": 1, "waypointy": 1, "waypointz": 1 }, { "distance": 2, "angle": 2, "waypointx": 2, "waypointy": 2, "waypointz": 2 }, { "distance": 3, "angle": 3, "waypointx": 3, "waypointy": 3, "waypointz": 3 } ] } |
 | --- |
 
 返回值对象属性说明：
@@ -115,11 +115,20 @@ http://ip:port/sendFlyData?siteId=11&deviceId=1&airlineKey=AAAA&detectTimeCur=20
 file 中无人机位置信息JSON文件中字段格式说明：（当前航线信息需设置(3秒)时间发送一次）
 
 无人机这里一秒记录1次，每3秒发送含有3个元素的数组，每个元素有如下数据
-
+其中 `px`、`py` 新增来源如下：
+订阅话题名称：`/Odometry_px`
+消息类型：`geometry_msgs/Point` 
+字段说明：
+-`x: float64` - 地图像素坐标 x（保留3位小数）
+- `y: float64` - 地图像素坐标 y（保留3位小数）
+- `z: float64` - 固定为 `0.0`（未使用）
+- 发布频率：跟随 `/Odometry_global` 的频率
 | 属性名 | 类型 | 描述 |
 | --- | --- | --- |
 | timeStamp | string | 记录时间，格式：2025-07-01 12:59:59 |
 | positionx | double | DJI无人机当前位置 x精度0.00 |
+| px | double | 航点X像素坐标，精度0.00 |
+| py | double | 航点Y像素坐标，精度0.00 |
 | positiony | double | DJI无人机当前位置 y精度0.00 |
 | positionz | double | DJI无人机当前位置 z精度0.00 |
 | attitudeRoll | double | DJI无人机当前姿态roll精度0.00 |
