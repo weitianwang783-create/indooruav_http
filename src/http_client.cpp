@@ -1181,11 +1181,7 @@ bool HttpClient::BuildRecordedWaypointAirlineFromYaml(const std::string& yaml_pa
             basename = basename.substr(0, basename.size() - 5);
         }
         airline->airline_key = basename;
-        if (root["map3d_name"]) {
-            airline->airline_map = "/P_P/" + root["map3d_name"].as<std::string>() + ".png";
-        } else {
-            airline->airline_map.clear();
-        }
+airline->airline_map = "/P_P/" + basename + ".png";
         airline->xscale = root["map2d_scale_x"] ? root["map2d_scale_x"].as<double>() : default_waypoint_xscale_;
         airline->yscale = root["map2d_scale_y"] ? root["map2d_scale_y"].as<double>() : default_waypoint_yscale_;
         airline->xzero = root["map2d_origin_px_x"] ? root["map2d_origin_px_x"].as<double>() : default_waypoint_xzero_;
@@ -1309,21 +1305,6 @@ bool HttpClient::TrySendWaypointAirlineFromFile(const std::string& yaml_path,
         return false;
     }
 
-    std::string map_name;
-    if (!airline.airline_map.empty()) {
-        const std::string prefix = "/P_P/";
-        const std::string suffix = ".png";
-        if (airline.airline_map.size() > prefix.size() + suffix.size() &&
-            airline.airline_map.compare(0, prefix.size(), prefix) == 0 &&
-            airline.airline_map.compare(airline.airline_map.size() - suffix.size(), suffix.size(), suffix) == 0) {
-            map_name = airline.airline_map.substr(prefix.size(), airline.airline_map.size() - prefix.size() - suffix.size());
-        }
-    }
-    if (!map_name.empty() && !FtpUploadMapImage(map_name)) {
-        ROS_WARN("Auto sendAirline deferred for [%s], map image FTP upload failed", yaml_path.c_str());
-        return false;
-    }
-
     {
         std::lock_guard<std::mutex> lock(waypoint_poll_mutex_);
         waypoint_file_mtime_store_[yaml_path] = current_mtime;
@@ -1349,6 +1330,14 @@ bool HttpClient::TrySendWaypointAirlineFromFile(const std::string& yaml_path,
     } else {
         ROS_INFO("Auto sendAirline skipped for [%s] airlineKey=%s, already exists on server",
                  yaml_path.c_str(), airline.airline_key.c_str());
+    }
+
+    std::string map_name = yaml_path.substr(yaml_path.find_last_of('/') + 1);
+    if (map_name.size() > 5 && map_name.compare(map_name.size() - 5, 5, ".yaml") == 0) {
+        map_name = map_name.substr(0, map_name.size() - 5);
+    }
+    if (!map_name.empty()) {
+        FtpUploadMapImage(map_name);
     }
     return true;
 }
