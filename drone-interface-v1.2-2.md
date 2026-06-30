@@ -24,12 +24,15 @@ file 中航点JSON文件中字段格式说明：
 | yscale | double |y轴与地图像素的比例，比如15.8，表示坐标：地图像素为15.8:1 |
 | xzero | double |原点在地图X轴的像素位置 |
 | yzero | double |原点在地图Y轴的像素位置 |
+| angle | double |图片旋转角度|
 | waypointList | 集合 | 航点集合 |
 
 waypointList字段格式说明：
 
 | 属性名 | 类型 | 描述 |
 | --- | --- | --- |
+| px | double | 航点X像素坐标，精度0.00 |
+| py | double | 航点Y像素坐标，精度0.00 |
 | waypointx | double | 航点x坐标，精度0.00 |
 | waypointy | double | 航点y坐标，精度0.00 |
 | waypointz | double | 航点z坐标，精度0.00 |

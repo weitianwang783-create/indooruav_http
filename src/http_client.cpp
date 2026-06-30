@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -92,6 +93,7 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
     nh_private.param<std::string>("takeoff_state_topic", takeoff_state_topic_, "/indooruav_http/takeoff_state");
     nh_private.param<std::string>("battery_topic", battery_topic_, "/battery_state");
     nh_private.param<std::string>("odom_topic", odom_topic_, "/Odometry_rotate");
+    nh_private.param<std::string>("odom_px_topic", odom_px_topic_, "/Odometry_px");
     nh_private.param<std::string>("odom_fallback_topic", odom_fallback_topic_, "/Odometry");
     nh_private.param<std::string>("gimbal_topic", gimbal_topic_, "/gimbal/attitude");
     nh_private.param<std::string>("detection_topic", detection_topic_, "/detection/result");
@@ -230,6 +232,7 @@ void HttpClient::SetupSubscribers(ros::NodeHandle& nh) {
         odom_fallback_sub_ = nh.subscribe(odom_fallback_topic_, 10, &HttpClient::OdomCallback, this);
     }
     gimbal_sub_ = nh.subscribe(gimbal_topic_, 10, &HttpClient::GimbalCallback, this);
+    odom_px_sub_ = nh.subscribe(odom_px_topic_, 10, &HttpClient::OdomPxCallback, this);
     detection_sub_ = nh.subscribe(detection_topic_, 10, &HttpClient::DetectionCallback, this);
     airline_info_sub_ = nh.subscribe(airline_info_topic_, 10, &HttpClient::AirlineInfoCallback, this);
     airline_key_sub_ = nh.subscribe(airline_key_topic_, 10, &HttpClient::AirlineKeyCallback, this);
@@ -395,6 +398,8 @@ void HttpClient::OdomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
     state.abnormal_locx = abnormal_locx_;
     state.abnormal_locy = abnormal_locy_;
     state.abnormal_locz = abnormal_locz_;
+    state.px = odom_px_;
+    state.py = odom_py_;
 
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     flight_state_buffer_.push_back(state);
@@ -404,6 +409,11 @@ void HttpClient::OdomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
     while (flight_state_buffer_.size() > max_size) {
         flight_state_buffer_.pop_front();
     }
+}
+
+void HttpClient::OdomPxCallback(const geometry_msgs::Point::ConstPtr& msg) {
+    odom_px_ = msg->x;
+    odom_py_ = msg->y;
 }
 
 void HttpClient::GimbalCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
@@ -1120,6 +1130,31 @@ indooruav_msgs::TransferMissionMedia::Response HttpClient::TransferMissionMediaF
     return service.response;
 }
 
+void HttpClient::FillWaypointPxPy(Waypoint& waypoint) const {
+    std::lock_guard<std::mutex> lock(buffer_mutex_);
+    if (flight_state_buffer_.empty()) {
+        return;
+    }
+
+    double best_dist = std::numeric_limits<double>::max();
+    const FlightState* best = nullptr;
+    for (const auto& state : flight_state_buffer_) {
+        double dx = state.positionx - waypoint.waypointx;
+        double dy = state.positiony - waypoint.waypointy;
+        double dz = state.positionz - waypoint.waypointz;
+        double dist = dx * dx + dy * dy + dz * dz;
+        if (dist < best_dist) {
+            best_dist = dist;
+            best = &state;
+        }
+    }
+
+    if (best != nullptr) {
+        waypoint.px = best->px;
+        waypoint.py = best->py;
+    }
+}
+
 bool HttpClient::BuildRecordedWaypointAirlineFromYaml(const std::string& yaml_path,
                                                   Airline* airline,
                                                   size_t* manual_waypoint_count,
@@ -1151,10 +1186,11 @@ bool HttpClient::BuildRecordedWaypointAirlineFromYaml(const std::string& yaml_pa
         } else {
             airline->airline_map.clear();
         }
-        airline->xscale = default_waypoint_xscale_;
-        airline->yscale = default_waypoint_yscale_;
-        airline->xzero = default_waypoint_xzero_;
-        airline->yzero = default_waypoint_yzero_;
+        airline->xscale = root["map2d_scale_x"] ? root["map2d_scale_x"].as<double>() : default_waypoint_xscale_;
+        airline->yscale = root["map2d_scale_y"] ? root["map2d_scale_y"].as<double>() : default_waypoint_yscale_;
+        airline->xzero = root["map2d_origin_px_x"] ? root["map2d_origin_px_x"].as<double>() : default_waypoint_xzero_;
+        airline->yzero = root["map2d_origin_px_y"] ? root["map2d_origin_px_y"].as<double>() : default_waypoint_yzero_;
+        airline->angle = root["map2d_rotation_deg"] ? root["map2d_rotation_deg"].as<double>() : 0.0;
         airline->waypoint_list.clear();
         *manual_waypoint_count = 0;
 
@@ -1171,6 +1207,7 @@ bool HttpClient::BuildRecordedWaypointAirlineFromYaml(const std::string& yaml_pa
             waypoint.waypointz = node["z"].as<double>();
             waypoint.angle = node["yaw_deg"].as<double>();
             waypoint.distance = 0.0;
+            FillWaypointPxPy(waypoint);
             airline->waypoint_list.push_back(waypoint);
             ++(*manual_waypoint_count);
         }
@@ -1485,6 +1522,7 @@ bool HttpClient::HandleSendAirline(indooruav_http::SendAirline::Request& req,
     airline.yscale = req.yscale;
     airline.xzero = req.xzero;
     airline.yzero = req.yzero;
+    airline.angle = req.angle;
     try {
         json list = json::parse(req.waypoint_list_json);
         if (!list.is_array()) {
