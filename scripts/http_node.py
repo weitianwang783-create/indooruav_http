@@ -2,9 +2,12 @@
 # -*- coding: utf-8 -*-
 
 import rospy
+import rospkg
 import threading
 import json
 import time
+import os
+import yaml
 import requests
 from flask import Flask, request, jsonify
 from indooruav_http.srv import SendAirline, SendAirlineResponse
@@ -18,6 +21,43 @@ site_id = 11
 device_id = 1
 airline_key_current = "AAAA"
 
+def read_pixel_file(airline_key):
+    """
+    从 waypoints_pixel 目录读取与 airline_key 对应的像素坐标文件。
+    文件名格式：<airlineKey>_pixel.yaml
+    返回 [{px, py}, ...] 列表，找不到或出错时返回空列表。
+    """
+    try:
+        rospack = rospkg.RosPack()
+        waypoint_pkg_path = rospack.get_path('indooruav_waypoint')
+    except Exception as e:
+        rospy.logwarn(f"Failed to get indooruav_waypoint package path: {e}")
+        return []
+
+    pixel_file = os.path.join(waypoint_pkg_path, 'waypoints_pixel', f"{airline_key}_pixel.yaml")
+    if not os.path.isfile(pixel_file):
+        rospy.logwarn(f"Pixel file not found: {pixel_file}")
+        return []
+
+    pixels = []
+    try:
+        with open(pixel_file, 'r') as f:
+            # 每行是一个独立的 YAML 文档 {px: ..., py: ...}
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                doc = yaml.safe_load(line)
+                if isinstance(doc, dict) and 'px' in doc and 'py' in doc:
+                    pixels.append({'px': float(doc['px']), 'py': float(doc['py'])})
+    except Exception as e:
+        rospy.logerr(f"Failed to parse pixel file {pixel_file}: {e}")
+        return []
+
+    rospy.loginfo(f"Loaded {len(pixels)} pixel coordinates from {pixel_file}")
+    return pixels
+
+
 # ================= HTTP Server (前端发往无人机) =================
 
 @app.route('/sendAirline', methods=['GET', 'POST'])
@@ -29,7 +69,7 @@ def send_airline():
     try:
         req_site_id = request.args.get('siteId', 11, type=int)
         req_device_id = request.args.get('deviceId', 1, type=int)
-        
+
         # 假设json内容放在body中（或者作为文件上传）
         route_data = request.json
         if not route_data and 'file' in request.files:
@@ -50,12 +90,23 @@ def send_airline():
         angle = route_data.get('angle', 0.0)
         waypoint_list = route_data.get('waypointList', [])
 
+        # 从 waypoints_pixel 目录读取像素坐标，按索引填充 px, py
+        pixels = read_pixel_file(airline_key)
+        if pixels:
+            for idx, wp in enumerate(waypoint_list):
+                if idx < len(pixels):
+                    wp['px'] = pixels[idx]['px']
+                    wp['py'] = pixels[idx]['py']
+            rospy.loginfo(f"Filled px/py for {len(waypoint_list)} waypoints from pixel file")
+        else:
+            rospy.logwarn(f"No pixel data found for airlineKey={airline_key}, px/py will remain as received")
+
         # 调用ROS服务通知系统其他节点航线信息
         rospy.wait_for_service('/indooruav/send_airline', timeout=2.0)
         airline_srv = rospy.ServiceProxy('/indooruav/send_airline', SendAirline)
 
         resp = airline_srv(airline_key, airline_map, xscale, yscale, xzero, yzero, angle, json.dumps(waypoint_list))
-        
+
         return jsonify({"resultCode": resp.result_code})
 
     except Exception as e:

@@ -31,6 +31,7 @@ waypointList字段格式说明：
 
 | 属性名 | 类型 | 描述 |
 | --- | --- | --- |
+| pointId| int | 航点唯一标识 |
 | px | double | 航点X像素坐标，精度0.00 |
 | py | double | 航点Y像素坐标，精度0.00 |
 | waypointx | double | 航点x坐标，精度0.00 |
@@ -38,6 +39,9 @@ waypointList字段格式说明：
 | waypointz | double | 航点z坐标，精度0.00 |
 | distance | double | 距离，精度0.00 |
 | angle | double | 角度，精度0.00 |
+
+
+说明:px和py从 indooruav_waypoint/waypoints_pixel的同名文件加上_pixel的yaml文件获取
 
 JSON示例：
 

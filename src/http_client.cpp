@@ -1203,7 +1203,44 @@ airline->airline_map = "/P_P/" + basename + ".png";
             waypoint.waypointz = node["z"].as<double>();
             waypoint.angle = node["yaw_deg"].as<double>();
             waypoint.distance = 0.0;
-            FillWaypointPxPy(waypoint);
+            // 从 waypoints_pixel 目录读取对应像素文件，按 stop=true 的索引顺序填充 px,py
+            {
+                static std::string cached_pixel_basename;
+                static std::vector<std::pair<double, double>> cached_pixels;
+                if (cached_pixel_basename != basename) {
+                    cached_pixel_basename = basename;
+                    cached_pixels.clear();
+                    const std::string pixel_dir = ros::package::getPath("indooruav_waypoint") + "/waypoints_pixel/";
+                    const std::string pixel_file = pixel_dir + basename + "_pixel.yaml";
+                    std::ifstream in(pixel_file);
+                    if (!in.is_open()) {
+                        ROS_WARN("Pixel file not found: %s (px/py will be 0)", pixel_file.c_str());
+                    } else {
+                        std::string line;
+                        while (std::getline(in, line)) {
+                            line.erase(0, line.find_first_not_of(" \t\r\n"));
+                            line.erase(line.find_last_not_of(" \t\r\n") + 1);
+                            if (line.empty()) continue;
+                            try {
+                                YAML::Node doc = YAML::Load(line);
+                                if (doc["px"] && doc["py"]) {
+                                    cached_pixels.emplace_back(doc["px"].as<double>(),
+                                                               doc["py"].as<double>());
+                                }
+                            } catch (const YAML::Exception&) {
+                                // skip malformed line
+                            }
+                        }
+                        ROS_INFO("Loaded %zu pixel coordinates from %s",
+                                 cached_pixels.size(), pixel_file.c_str());
+                    }
+                }
+                const size_t pixel_idx = *manual_waypoint_count;
+                if (pixel_idx < cached_pixels.size()) {
+                    waypoint.px = cached_pixels[pixel_idx].first;
+                    waypoint.py = cached_pixels[pixel_idx].second;
+                }
+            }
             airline->waypoint_list.push_back(waypoint);
             ++(*manual_waypoint_count);
         }
