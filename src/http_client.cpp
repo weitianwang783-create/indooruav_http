@@ -63,7 +63,6 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
                        int server_port,
                        int site_id,
                        int device_id,
-                       double device_interval,
                        double flight_interval,
                        int sample_rate,
                        double takeoff_interval)
@@ -72,7 +71,6 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
     , server_port_(server_port)
     , site_id_(site_id)
     , device_id_(device_id)
-    , device_state_interval_(device_interval)
     , flight_state_interval_(flight_interval)
     , flight_state_sample_rate_(sample_rate)
     , takeoff_state_interval_(takeoff_interval) {
@@ -87,18 +85,14 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
     nh_private.param<std::string>("airline_key", airline_key_, "AAAA");
     nh_private.param<std::string>("airline_info_topic", airline_info_topic_, "/indooruav_http/airline_info");
     nh_private.param<std::string>("airline_key_topic", airline_key_topic_, "/indooruav_http/airline_key");
-    nh_private.param<std::string>("device_state_info_topic",
-                                  device_state_info_topic_,
-                                  "/indooruav_controller/http/device_state");
     nh_private.param<std::string>("takeoff_state_topic", takeoff_state_topic_, "/indooruav_http/takeoff_state");
-    nh_private.param<std::string>("battery_topic", battery_topic_, "/battery_state");
     nh_private.param<std::string>("odom_topic", odom_topic_, "/Odometry_rotate");
     nh_private.param<std::string>("odom_px_topic", odom_px_topic_, "/Odometry_px");
+    nh_private.param<std::string>("odom_waypoints_id_topic", odom_waypoints_id_topic_, "/Odometry_waypointsid");
     nh_private.param<std::string>("odom_fallback_topic", odom_fallback_topic_, "/Odometry");
     nh_private.param<std::string>("gimbal_topic", gimbal_topic_, "/gimbal/attitude");
     nh_private.param<std::string>("detection_topic", detection_topic_, "/detection/result");
     nh_private.param<bool>("enable_detection_error", enable_detection_error_, true);
-    nh_private.param<double>("uav_online_timeout_sec", uav_online_timeout_sec_, 5.0);
     nh_private.param<std::string>("post_land_image_root_dir",
                                   post_land_image_root_dir_,
                                   "/tmp/indooruav_post_land_images");
@@ -181,12 +175,6 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
         }
     }
 
-    nh_private.param<int>("uav_state", current_device_state_.uav_state, 1);
-    nh_private.param<int>("control_state", current_device_state_.control_state, 1);
-    nh_private.param<double>("control_soc", current_device_state_.control_soc, 0.0);
-    nh_private.param<double>("control_rssi", current_device_state_.control_rssi, 0.0);
-    nh_private.param<double>("battery_rssi", current_device_state_.battery_rssi, 0.0);
-    nh_private.param<int>("battery_cycle_num", current_device_state_.battery_cycle_num, 0);
     nh_private.param<int>("takeoff_state", takeoff_state_, 1);
 
     SetupSubscribers(nh);
@@ -204,11 +192,6 @@ HttpClient::~HttpClient() {
 }
 
 void HttpClient::StartTimers() {
-    device_state_timer_ = nh_.createTimer(
-        ros::Duration(device_state_interval_),
-        &HttpClient::DeviceStateTimerCallback,
-        this);
-
     flight_state_timer_ = nh_.createTimer(
         ros::Duration(flight_state_interval_),
         &HttpClient::FlightStateTimerCallback,
@@ -226,17 +209,16 @@ void HttpClient::StartTimers() {
 }
 
 void HttpClient::SetupSubscribers(ros::NodeHandle& nh) {
-    battery_sub_ = nh.subscribe(battery_topic_, 10, &HttpClient::BatteryCallback, this);
     odom_sub_ = nh.subscribe(odom_topic_, 10, &HttpClient::OdomCallback, this);
     if (!odom_fallback_topic_.empty() && odom_fallback_topic_ != odom_topic_) {
         odom_fallback_sub_ = nh.subscribe(odom_fallback_topic_, 10, &HttpClient::OdomCallback, this);
     }
     gimbal_sub_ = nh.subscribe(gimbal_topic_, 10, &HttpClient::GimbalCallback, this);
     odom_px_sub_ = nh.subscribe(odom_px_topic_, 10, &HttpClient::OdomPxCallback, this);
+    odom_waypoints_id_sub_ = nh.subscribe(odom_waypoints_id_topic_, 10, &HttpClient::OdomWaypointsIdCallback, this);
     detection_sub_ = nh.subscribe(detection_topic_, 10, &HttpClient::DetectionCallback, this);
     airline_info_sub_ = nh.subscribe(airline_info_topic_, 10, &HttpClient::AirlineInfoCallback, this);
     airline_key_sub_ = nh.subscribe(airline_key_topic_, 10, &HttpClient::AirlineKeyCallback, this);
-    device_state_info_sub_ = nh.subscribe(device_state_info_topic_, 10, &HttpClient::DeviceStateInfoCallback, this);
     takeoff_state_sub_ = nh.subscribe(takeoff_state_topic_, 10, &HttpClient::TakeoffStateTopicCallback, this);
 }
 
@@ -291,62 +273,7 @@ void HttpClient::SetupServices(ros::NodeHandle& nh) {
         this);
 }
 
-void HttpClient::MarkTelemetryReceived() {
-    last_telemetry_time_ = ros::Time::now();
-}
-
-void HttpClient::UpdateDerivedDeviceState() {
-    if (HasFreshDeviceStateInfo()) {
-        return;
-    }
-
-    int next_uav_state = 1;
-    if (uav_online_timeout_sec_ > 0.0 && !last_telemetry_time_.isZero()) {
-        const double silence_sec = (ros::Time::now() - last_telemetry_time_).toSec();
-        if (silence_sec > uav_online_timeout_sec_) {
-            next_uav_state = 0;
-        }
-    }
-
-    if (current_device_state_.uav_state != next_uav_state) {
-        ROS_INFO("uavState changed from %d to %d",
-                 current_device_state_.uav_state,
-                 next_uav_state);
-        current_device_state_.uav_state = next_uav_state;
-    }
-}
-
-bool HttpClient::HasFreshDeviceStateInfo() const {
-    if (!has_device_state_info_) {
-        return false;
-    }
-
-    if (uav_online_timeout_sec_ <= 0.0) {
-        return true;
-    }
-
-    if (last_device_state_info_time_.isZero()) {
-        return false;
-    }
-
-    const double silence_sec = (ros::Time::now() - last_device_state_info_time_).toSec();
-    return silence_sec <= uav_online_timeout_sec_;
-}
-
-void HttpClient::BatteryCallback(const sensor_msgs::BatteryState::ConstPtr& msg) {
-    MarkTelemetryReceived();
-    if (HasFreshDeviceStateInfo()) {
-        return;
-    }
-
-    current_device_state_.battery_soc = msg->percentage * 100.0;
-    current_device_state_.battery_volt = msg->voltage;
-    current_device_state_.battery_temp = msg->temperature;
-}
-
 void HttpClient::OdomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
-    MarkTelemetryReceived();
-
     const ros::Time now = msg->header.stamp.isZero() ? ros::Time::now() : msg->header.stamp;
     const double min_interval = flight_state_sample_rate_ > 0
         ? 1.0 / static_cast<double>(flight_state_sample_rate_)
@@ -400,6 +327,7 @@ void HttpClient::OdomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
     state.abnormal_locz = abnormal_locz_;
     state.px = odom_px_;
     state.py = odom_py_;
+    state.point_id = latest_waypoint_id_;
 
     std::lock_guard<std::mutex> lock(buffer_mutex_);
     flight_state_buffer_.push_back(state);
@@ -416,8 +344,11 @@ void HttpClient::OdomPxCallback(const geometry_msgs::Point::ConstPtr& msg) {
     odom_py_ = msg->y;
 }
 
+void HttpClient::OdomWaypointsIdCallback(const std_msgs::UInt32::ConstPtr& msg) {
+    latest_waypoint_id_ = static_cast<int>(msg->data);
+}
+
 void HttpClient::GimbalCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
-    MarkTelemetryReceived();
     tf::Quaternion q(
         msg->pose.orientation.x,
         msg->pose.orientation.y,
@@ -495,45 +426,6 @@ void HttpClient::AirlineInfoCallback(const std_msgs::String::ConstPtr& msg) {
 void HttpClient::AirlineKeyCallback(const std_msgs::String::ConstPtr& msg) {
     std::lock_guard<std::mutex> lock(airline_mutex_);
     airline_key_ = msg->data;
-}
-
-void HttpClient::DeviceStateInfoCallback(const std_msgs::String::ConstPtr& msg) {
-    try {
-        const json j = json::parse(msg->data);
-        MarkTelemetryReceived();
-        has_device_state_info_ = true;
-        last_device_state_info_time_ = ros::Time::now();
-
-        if (j.contains("uavState")) {
-            current_device_state_.uav_state = j.value("uavState", current_device_state_.uav_state);
-        }
-        if (j.contains("controlState")) {
-            current_device_state_.control_state = j.value("controlState", current_device_state_.control_state);
-        }
-        if (j.contains("controlSoc")) {
-            current_device_state_.control_soc = j.value("controlSoc", current_device_state_.control_soc);
-        }
-        if (j.contains("controlRssi")) {
-            current_device_state_.control_rssi = j.value("controlRssi", current_device_state_.control_rssi);
-        }
-        if (j.contains("batteryTemp")) {
-            current_device_state_.battery_temp = j.value("batteryTemp", current_device_state_.battery_temp);
-        }
-        if (j.contains("batterySoc")) {
-            current_device_state_.battery_soc = j.value("batterySoc", current_device_state_.battery_soc);
-        }
-        if (j.contains("batteryRssi")) {
-            current_device_state_.battery_rssi = j.value("batteryRssi", current_device_state_.battery_rssi);
-        }
-        if (j.contains("batteryVolt")) {
-            current_device_state_.battery_volt = j.value("batteryVolt", current_device_state_.battery_volt);
-        }
-        if (j.contains("batteryCycleNum")) {
-            current_device_state_.battery_cycle_num = j.value("batteryCycleNum", current_device_state_.battery_cycle_num);
-        }
-    } catch (const std::exception& e) {
-        ROS_WARN("Failed to parse device state info JSON: %s", e.what());
-    }
 }
 
 void HttpClient::GetCurrentTargetIds(int* site_id, int* device_id) {
@@ -619,15 +511,6 @@ bool HttpClient::ResolveTargetIdsForMission(const std::string& airline_key,
 void HttpClient::TakeoffStateTopicCallback(const std_msgs::Int32::ConstPtr& msg) {
     std::lock_guard<std::mutex> lock(takeoff_mutex_);
     takeoff_state_ = msg->data;
-}
-
-void HttpClient::DeviceStateTimerCallback(const ros::TimerEvent& event) {
-    (void)event;
-    UpdateDerivedDeviceState();
-    HttpResult result = SendDeviceState(current_device_state_);
-    if (result.result_code != 1) {
-        ROS_WARN("sendDeviceData failed with resultCode=%d", result.result_code);
-    }
 }
 
 void HttpClient::FlightStateTimerCallback(const ros::TimerEvent& event) {
@@ -774,22 +657,6 @@ HttpResult HttpClient::SendPicWithMission(int site_id,
                                    bytes,
                                    airline_key,
                                    detect_time_cur);
-}
-
-HttpResult HttpClient::SendDeviceState(const DeviceState& device_state) {
-    int site_id = 0;
-    int device_id = 0;
-    GetCurrentTargetIds(&site_id, &device_id);
-
-    std::string path = "/sendDeviceData?siteId=" + std::to_string(site_id) +
-                       "&deviceId=" + std::to_string(device_id);
-
-    const std::string file_body = device_state.ToJson().dump();
-    httplib::UploadFormDataItems items;
-    items.push_back({"file", file_body, "file.json", kJsonContentType});
-
-    std::lock_guard<std::mutex> lock(http_mutex_);
-    return ParseResult(client_->Post(path.c_str(), items));
 }
 
 HttpResult HttpClient::SendFlightStates(const std::vector<FlightState>& flight_states) {
@@ -1241,6 +1108,7 @@ airline->airline_map = "/P_P/" + basename + ".png";
                     waypoint.py = cached_pixels[pixel_idx].second;
                 }
             }
+            waypoint.point_id = static_cast<int>(*manual_waypoint_count) + 1;
             airline->waypoint_list.push_back(waypoint);
             ++(*manual_waypoint_count);
         }

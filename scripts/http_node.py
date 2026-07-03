@@ -138,36 +138,6 @@ def run_flask(port):
 
 # ================= HTTP Client (无人机发往前端) =================
 
-def send_device_data_task():
-    """ 1.2、发送设备状态信息 (30秒) """
-    rate = rospy.Rate(1.0 / 30.0)
-    while not rospy.is_shutdown():
-        try:
-            # TODO: 替换为订阅到的真实数据
-            payload = {
-                "uavState": 1,
-                "controlState": 1,
-                "controlSoc": 90.1,
-                "controlRssi": 99.9,
-                "batteryTemp": 50.5,
-                "batterySoc": 90.9,
-                "batteryRssi": 99.9,
-                "batteryVolt": 40.1,
-                "batteryCycleNum": 1
-            }
-
-            url = f"{server_url}/sendDeviceData?siteId={site_id}&deviceId={device_id}"
-            
-            # 使用 files 参数模拟上传 json 文件或者直接 post json
-            files = {'file': ('file.json', json.dumps(payload), 'application/json')}
-            resp = requests.post(url, files=files, timeout=5)
-            # rospy.loginfo(f"send_device_data resp: {resp.text}")
-
-        except Exception as e:
-            rospy.logwarn(f"Failed to send device data: {e}")
-            
-        rate.sleep()
-
 def send_fly_data_task():
     """ 1.3、发送无人机位置信息 (3秒) """
     rate = rospy.Rate(1.0 / 3.0)
@@ -177,6 +147,7 @@ def send_fly_data_task():
             
             # TODO: 替换为真实的飞行点迹列表 (每秒采集一次，满3个打成数组)
             payload = [{
+                "pointId": 0,
                 "timeStamp": time.strftime('%Y-%m-%d %H:%M:%S', time.localtime()),
                 "positionx": 11.1, "positiony": 22.2, "positionz": 33.3,
                 "px": 0.0, "py": 0.0,
@@ -230,10 +201,6 @@ if __name__ == '__main__':
     rospy.loginfo(f"HTTP Server started on port {local_port}")
 
     # 2. 启动 HTTP Client 循环上报任务 (在子线程，以免阻塞 ROS spin)
-    t_device = threading.Thread(target=send_device_data_task)
-    t_device.daemon = True
-    t_device.start()
-
     t_fly = threading.Thread(target=send_fly_data_task)
     t_fly.daemon = True
     t_fly.start()

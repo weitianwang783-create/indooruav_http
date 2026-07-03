@@ -45,7 +45,7 @@ waypointList字段格式说明：
 
 JSON示例：
 
-| { "airlineKey": "AAAAAAAAA", "airlineMap": "/P_P/<map_name>.png", "xscale": 15.8, "yscale": 15.8, "xzero": 0.0, "yzero": 0.0, "waypointList": [ { "distance": 1, "angle": 1, "waypointx": 1, "waypointy": 1, "waypointz": 1 }, { "distance": 2, "angle": 2, "waypointx": 2, "waypointy": 2, "waypointz": 2 }, { "distance": 3, "angle": 3, "waypointx": 3, "waypointy": 3, "waypointz": 3 } ] } |
+| {"pointId": 1, "airlineKey": "AAAAAAAAA", "airlineMap": "/P_P/<map_name>.png", "xscale": 15.8, "yscale": 15.8, "xzero": 0.0, "yzero": 0.0, "waypointList": [ { "distance": 1, "angle": 1, "waypointx": 1, "waypointy": 1, "waypointz": 1 }, { "distance": 2, "angle": 2, "waypointx": 2, "waypointy": 2, "waypointz": 2 }, { "distance": 3, "angle": 3, "waypointx": 3, "waypointy": 3, "waypointz": 3 } ] } |
 | --- |
 
 返回值对象属性说明：
@@ -58,7 +58,6 @@ JSON示例：
 
 | { "resultCode": 1 } |
 | --- |
-
 ## 1.2、发送设备状态信息
 
 http://ip:port/sendDeviceData?siteId=11&deviceId=1&file=file.json
@@ -88,7 +87,7 @@ file 中设备状态JSON文件中字段格式说明：（设备状态需可设�
 
 JSON示例：
 
-| { "uavState": 1, "controlState": 1, "controlSoc": 90.1, "controlRssi": 99.9, "batteryTemp": 50.5, "batterySoc": 90.9, "batteryRssi": 99.9, "batteryVolt": 40.1, "batteryCycleNum": 1} |
+| { "uavState": 1, "controlState": 1, "controlSoc": 90.1, "controlRssi": 99.9, "batteryTemp": 50.5, "batterySoc": 90.9, "batteryRssi": 99.9, "batteryVolt": 40.1, "batteryCycleNum": 1, } |
 | --- |
 
 返回值对象属性说明：
@@ -101,7 +100,6 @@ JSON示例：
 
 | { "resultCode": 1 } |
 | --- |
-
 ## 1.3、发送无人机位置信息
 
 http://ip:port/sendFlyData?siteId=11&deviceId=1&airlineKey=AAAA&detectTimeCur=20250701125959&file=file.json
@@ -129,6 +127,7 @@ file 中无人机位置信息JSON文件中字段格式说明：（当前航线�
 - 发布频率：跟随 `/Odometry_global` 的频率
 | 属性名 | 类型 | 描述 |
 | --- | --- | --- |
+| pointId| int | 航点唯一标识 |
 | timeStamp | string | 记录时间，格式：2025-07-01 12:59:59 |
 | positionx | double | DJI无人机当前位置 x精度0.00 |
 | px | double | 航点X像素坐标，精度0.00 |
@@ -156,7 +155,7 @@ file 中无人机位置信息JSON文件中字段格式说明：（当前航线�
 
 JSON示例：
 
-| [ { "timeStamp": "2025-10-15 13:57:38", "positionx": 11.1, "positiony": 22.2, "positionz": 33.3, "attitudeRoll": 111.4, "attitudePitch": 222.5, "attitudeYaw": 333.6, "horizontalSpeed": 20.7, "verticalSpeed": 1.8, "lineType": 1, "poseAngleRoll": 1111.9, "poseAnglePitch": 2222.1, "poseAngleYaw": 3333.2, "pantographIs": 0, "abnormalIs": 0, "pantographLocx": 10.3, "pantographLocy": 10.4, "pantographLocz": 10.5, "abnormalLocx": 20.6, "abnormalLocy": 20.7, "abnormalLocz": 20.8 } ] |
+| [ { "pointId": 1, "timeStamp": "2025-10-15 13:57:38", "positionx": 11.1, "px": 11.1, "py": 22.2, "positiony": 22.2, "positionz": 33.3, "attitudeRoll": 111.4, "attitudePitch": 222.5, "attitudeYaw": 333.6, "horizontalSpeed": 20.7, "verticalSpeed": 1.8, "lineType": 1, "poseAngleRoll": 1111.9, "poseAnglePitch": 2222.1, "poseAngleYaw": 3333.2, "pantographIs": 0, "abnormalIs": 0, "pantographLocx": 10.3, "pantographLocy": 10.4, "pantographLocz": 10.5, "abnormalLocx": 20.6, "abnormalLocy": 20.7, "abnormalLocz": 20.8 } ] |
 | --- |
 
 返回值对象属性说明：
@@ -168,7 +167,7 @@ JSON示例：
 返回值示例：
 
 | { "resultCode": 1 } |
-| --- |吗
+| --- |
 
 ## 1.4、发送报警、安全信息
 

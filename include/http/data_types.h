@@ -10,6 +10,7 @@ namespace indooruav_http {
 using json = nlohmann::json;
 
 struct Waypoint {
+	int point_id = 0;
 	double px = 0.0;
 	double py = 0.0;
 	double waypointx = 0.0;
@@ -20,6 +21,7 @@ struct Waypoint {
 
 	static Waypoint FromJson(const json& j) {
 		Waypoint wp;
+		wp.point_id = j.value("pointId", 0);
 		wp.px = j.value("px", 0.0);
 		wp.py = j.value("py", 0.0);
 		wp.waypointx = j.value("waypointx", 0.0);
@@ -32,6 +34,7 @@ struct Waypoint {
 
 	json ToJson() const {
 		return json{
+			{"pointId", point_id},
 			{"px", px},
 			{"py", py},
 			{"waypointx", waypointx},
@@ -88,32 +91,6 @@ struct Airline {
 	}
 };
 
-struct DeviceState {
-	int uav_state = 0;
-	int control_state = 0;
-	double control_soc = 0.0;
-	double control_rssi = 0.0;
-	double battery_temp = 0.0;
-	double battery_soc = 0.0;
-	double battery_rssi = 0.0;
-	double battery_volt = 0.0;
-	int battery_cycle_num = 0;
-
-	json ToJson() const {
-		return json{
-			{"uavState", uav_state},
-			{"controlState", control_state},
-			{"controlSoc", control_soc},
-			{"controlRssi", control_rssi},
-			{"batteryTemp", battery_temp},
-			{"batterySoc", battery_soc},
-			{"batteryRssi", battery_rssi},
-			{"batteryVolt", battery_volt},
-			{"batteryCycleNum", battery_cycle_num}
-		};
-	}
-};
-
 struct FlightState {
 	std::string time_stamp;
 	double positionx = 0.0;
@@ -136,11 +113,13 @@ struct FlightState {
 	double abnormal_locx = 0.0;
 	double abnormal_locy = 0.0;
 	double abnormal_locz = 0.0;
+	int point_id = 0;
 	double px = 0.0;
 	double py = 0.0;
 
 	json ToJson() const {
 		return json{
+			{"pointId", point_id},
 			{"timeStamp", time_stamp},
 			{"positionx", positionx},
 			{"positiony", positiony},

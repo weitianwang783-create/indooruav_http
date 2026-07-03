@@ -3,13 +3,12 @@ server_ip: "192.168.1.107"
 server_port: 7000
 site_id: 11
 device_id: 1
-device_state_interval: 30.0
 flight_state_interval: 3.0
 flight_state_sample_rate: 1
 takeoff_state_interval: 3.0
-uav_online_timeout_sec: 5.0
-device_state_info_topic: "/indooruav_controller/http/device_state"
 odom_topic: "/Odometry_global"
+odom_px_topic: "/Odometry_px"
+odom_waypoints_id_topic: "/Odometry_waypointsid"
 odom_fallback_topic: "/Odometry"
 post_land_image_root_dir: "/tmp/indooruav_post_land_images"
 post_land_image_source_mode: "drone_sd_card"

@@ -16,8 +16,8 @@
 #include <geometry_msgs/Point.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <nav_msgs/Odometry.h>
-#include <sensor_msgs/BatteryState.h>
 #include <std_msgs/Int32.h>
+#include <std_msgs/UInt32.h>
 #include <std_msgs/String.h>
 #include <std_srvs/Empty.h>
 #include <std_srvs/Trigger.h>
@@ -45,7 +45,6 @@ public:
 			   int server_port,
 			   int site_id,
 			   int device_id,
-			   double device_interval,
 			   double flight_interval,
 			   int sample_rate,
 			   double takeoff_interval);
@@ -56,28 +55,21 @@ public:
 private:
 	void SetupSubscribers(ros::NodeHandle& nh);
 	void SetupServices(ros::NodeHandle& nh);
-	void MarkTelemetryReceived();
-	void UpdateDerivedDeviceState();
-	bool HasFreshDeviceStateInfo() const;
-
-	void BatteryCallback(const sensor_msgs::BatteryState::ConstPtr& msg);
 	void OdomCallback(const nav_msgs::Odometry::ConstPtr& msg);
 	void OdomPxCallback(const geometry_msgs::Point::ConstPtr& msg);
+	void OdomWaypointsIdCallback(const std_msgs::UInt32::ConstPtr& msg);
 	void GimbalCallback(const geometry_msgs::PoseStamped::ConstPtr& msg);
 	void DetectionCallback(const std_msgs::String::ConstPtr& msg);
 	void AirlineInfoCallback(const std_msgs::String::ConstPtr& msg);
 	void AirlineKeyCallback(const std_msgs::String::ConstPtr& msg);
-	void DeviceStateInfoCallback(const std_msgs::String::ConstPtr& msg);
 	void TakeoffStateTopicCallback(const std_msgs::Int32::ConstPtr& msg);
 
-	void DeviceStateTimerCallback(const ros::TimerEvent& event);
 	void FlightStateTimerCallback(const ros::TimerEvent& event);
 	void TakeoffStateTimerCallback(const ros::TimerEvent& event);
 	void WaypointPollTimerCallback(const ros::TimerEvent& event);
 
 	HttpResult SendAirline(const Airline& airline);
 	HttpResult SendPic(const std::string& image_path);
-	HttpResult SendDeviceState(const DeviceState& device_state);
 	HttpResult SendFlightStates(const std::vector<FlightState>& flight_states);
 	HttpResult SendErrorData(const ErrorData& error_data);
 	HttpResult SendTakeoffState(int takeoff_state);
@@ -169,9 +161,6 @@ private:
 	int server_port_ = 0;
 	int site_id_ = 0;
 	int device_id_ = 0;
-	double uav_online_timeout_sec_ = 5.0;
-
-	double device_state_interval_ = 30.0;
 	double flight_state_interval_ = 3.0;
 	int flight_state_sample_rate_ = 1;
 	double takeoff_state_interval_ = 3.0;
@@ -201,18 +190,16 @@ private:
 	std::atomic<bool> post_land_workflow_running_{false};
 	std::thread post_land_workflow_thread_;
 
-	DeviceState current_device_state_;
 	std::deque<FlightState> flight_state_buffer_;
 	mutable std::mutex buffer_mutex_;
-	ros::Time last_telemetry_time_;
 
 	ros::Time last_sample_time_;
-	ros::Time last_device_state_info_time_;
 	double gimbal_roll_ = 0.0;
 	double gimbal_pitch_ = 0.0;
 	double gimbal_yaw_ = 0.0;
 	double odom_px_ = 0.0;
 	double odom_py_ = 0.0;
+	int latest_waypoint_id_ = 0;
 	int pantograph_is_ = 0;
 	int abnormal_is_ = 0;
 	double pantograph_locx_ = 0.0;
@@ -222,7 +209,6 @@ private:
 	double abnormal_locy_ = 0.0;
 	double abnormal_locz_ = 0.0;
 	bool enable_detection_error_ = true;
-	bool has_device_state_info_ = false;
 
 	int airline_info_site_id_ = 0;
 	int airline_info_device_id_ = 0;
@@ -236,18 +222,16 @@ private:
 	int takeoff_state_ = 1;
 	std::mutex takeoff_mutex_;
 
-	ros::Subscriber battery_sub_;
 	ros::Subscriber odom_sub_;
 	ros::Subscriber odom_px_sub_;
+	ros::Subscriber odom_waypoints_id_sub_;
 	ros::Subscriber odom_fallback_sub_;
 	ros::Subscriber gimbal_sub_;
 	ros::Subscriber detection_sub_;
 	ros::Subscriber airline_info_sub_;
 	ros::Subscriber airline_key_sub_;
-	ros::Subscriber device_state_info_sub_;
 	ros::Subscriber takeoff_state_sub_;
 
-	ros::Timer device_state_timer_;
 	ros::Timer flight_state_timer_;
 	ros::Timer takeoff_state_timer_;
 
@@ -268,11 +252,10 @@ private:
 
 	std::string airline_key_topic_;
 	std::string airline_info_topic_;
-	std::string device_state_info_topic_;
 	std::string takeoff_state_topic_;
-	std::string battery_topic_;
 	std::string odom_topic_;
 	std::string odom_px_topic_;
+	std::string odom_waypoints_id_topic_;
 	std::string odom_fallback_topic_;
 	std::string gimbal_topic_;
 	std::string detection_topic_;
