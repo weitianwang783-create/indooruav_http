@@ -122,6 +122,8 @@ struct FlightState {
 			{"pointId", point_id},
 			{"timeStamp", time_stamp},
 			{"positionx", positionx},
+			{"px", px},
+			{"py", py},
 			{"positiony", positiony},
 			{"positionz", positionz},
 			{"attitudeRoll", attitude_roll},
