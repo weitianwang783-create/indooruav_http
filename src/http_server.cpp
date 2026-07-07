@@ -406,11 +406,11 @@ void HttpServer::LaunchNodesForTakeoff() {
 
     const std::string ws = ros::package::getPath("indooruav_http") + "/../..";
     const std::string shell_dir = ws + "/src/shell";
-    const std::string mid360_ws = ws + "/../../MID360/catkin_ws";
+    const std::string three_d_ws = std::string(std::getenv("HOME")) + "/Project/3D/catkin_ws";
 
     // 1. 启动雷达节点 (MID360)
     ROS_INFO("[Launch] Starting MID360 lidar...");
-    system(("roslaunch " + mid360_ws + "/src/livox_ros_driver2/launch_ROS1/msg_MID360.launch &").c_str());
+    system(("roslaunch " + three_d_ws + "/src/livox_ros_driver2/launch_ROS1/msg_MID360.launch &").c_str());
 
     // 2. 启动定位节点
     ROS_INFO("[Launch] Starting localization...");
@@ -420,7 +420,10 @@ void HttpServer::LaunchNodesForTakeoff() {
     ROS_INFO("[Launch] Starting state machine...");
     system(("bash " + shell_dir + "/bringup_indooruav_core.sh &").c_str());
 
-    // 4. 启动实物控制节点
+    // 4. 设置 I2C 和串口权限，然后启动实物控制节点
+    ROS_INFO("[Launch] Setting device permissions...");
+    system("echo \"888888\" | sudo -S chmod 666 /dev/i2c-7");
+    system("echo \"888888\" | sudo -S chmod 777 /dev/ttyTHS0");
     ROS_INFO("[Launch] Starting hardware controller...");
     system(("bash " + shell_dir + "/bringup_controller_hardware.sh &").c_str());
 
