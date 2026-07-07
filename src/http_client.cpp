@@ -2,7 +2,6 @@
 
 #include <dirent.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include <yaml-cpp/yaml.h>
 
@@ -1376,12 +1375,6 @@ void HttpClient::RunPostLandWorkflow() {
     }
 
     ROS_INFO("Post-land workflow finished for detectTimeCur=%s", detect_time_cur.c_str());
-
-    // == 着地后处理完成，重启系统 ==
-    ROS_INFO("Post-land workflow complete, rebooting system...");
-    std::system("sync");                                          // 刷写文件系统缓存
-    sleep(2);                                                     // 等待日志落盘
-    std::system("echo \"888888\" | sudo -S /sbin/reboot &");     // 后台重启（不阻塞当前线程）
 }
 
 bool HttpClient::HandleCacheAirlineMeta(indooruav_http::CacheAirlineMeta::Request& req,
