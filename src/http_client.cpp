@@ -1374,6 +1374,47 @@ void HttpClient::RunPostLandWorkflow() {
                  detect_time_cur.c_str());
     }
 
+    // 图片上传完毕，关闭所有起飞时启动的节点（逐个精确关闭）
+    ROS_INFO("[Shutdown] Stopping all nodes one by one...");
+
+    // 1. 关闭像素坐标发布脚本
+    system("pkill -f odometry_to_pixel.py 2>/dev/null");
+    ROS_INFO("[Shutdown] pixel publisher stopped");
+
+    // 2. 关闭降落节点
+    system("rosnode kill /mission_node 2>/dev/null");
+    // 如果不知道节点名，用 pkill 兜底
+    system("pkill -f bringup_mission 2>/dev/null");
+    ROS_INFO("[Shutdown] mission/landing stopped");
+
+    // 3. 关闭航线跟踪节点
+    system("rosnode kill /waypoint_tracker_node 2>/dev/null");
+    ROS_INFO("[Shutdown] waypoint tracker stopped");
+
+    // 4. 关闭实物控制节点
+    system("rosnode kill /controller_hardware 2>/dev/null");
+    ROS_INFO("[Shutdown] hardware controller stopped");
+
+    // 5. 关闭状态机节点
+    system("rosnode kill /indooruav_core 2>/dev/null");
+    ROS_INFO("[Shutdown] state machine stopped");
+
+    // 6. 关闭定位节点
+    system("rosnode kill /localizer_node 2>/dev/null");
+    ROS_INFO("[Shutdown] localizer stopped");
+
+    // 7. 关闭雷达节点
+    system("rosnode kill /livox_lidar_publisher2 2>/dev/null");
+    ROS_INFO("[Shutdown] lidar stopped");
+
+    // 8. 关掉 roslaunch 进程（rosnode kill 有时杀不干净）
+    system("pkill -f bringup_localize.sh 2>/dev/null");
+    system("pkill -f bringup_indooruav_core.sh 2>/dev/null");
+    system("pkill -f bringup_controller_hardware.sh 2>/dev/null");
+    system("pkill -f bringup_waypoint_tracker.sh 2>/dev/null");
+    system("pkill -f msg_MID360.launch 2>/dev/null");
+    ROS_INFO("[Shutdown] all nodes stopped");
+
     ROS_INFO("Post-land workflow finished for detectTimeCur=%s", detect_time_cur.c_str());
 }
 
