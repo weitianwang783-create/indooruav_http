@@ -2,10 +2,12 @@
 #define INDOORUAV_HTTP_SERVER_H
 
 #include <atomic>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include <ros/package.h>
 #include <ros/ros.h>
@@ -33,6 +35,9 @@ private:
 	void HandleAirlineInfo(const httplib::Request& req, httplib::Response& res);
 	void HandleCommand(const httplib::Request& req, httplib::Response& res);
 
+	void LaunchNodesForTakeoff();
+	void DelayedTakeoffCommand(const ros::TimerEvent& event);
+
 	bool CallCommandService(int command_mode);
 	bool GetIntParam(const httplib::Request& req, const std::string& key, int* value) const;
 	bool GetStringParam(const httplib::Request& req, const std::string& key, std::string* value) const;
@@ -45,6 +50,8 @@ private:
 	std::unique_ptr<std::thread> server_thread_;
 	std::atomic<bool> is_running_{false};
 
+	ros::NodeHandle nh_;
+
 	ros::Publisher airline_info_pub_;
 	ros::Publisher airline_key_pub_;
 	std::string airline_info_topic_;
@@ -54,6 +61,9 @@ private:
 	std::unordered_map<int, std::string> command_service_names_;
 	std::unordered_map<int, ros::ServiceClient> command_clients_;
 	double command_service_wait_timeout_sec_ = 1.0;
+
+	ros::Timer takeoff_timer_;
+	std::vector<pid_t> launched_pids_;
 };
 
 }  // namespace indooruav_http

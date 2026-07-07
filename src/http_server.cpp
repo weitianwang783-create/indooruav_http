@@ -75,7 +75,7 @@ bool UpdateYamlValue(const std::string& file_path, const std::string& key,
 
 // 构造HTTP服务端并初始化发布者/服务客户端/路由
 HttpServer::HttpServer(ros::NodeHandle& nh, int port)
-    : port_(port) {
+    : port_(port), nh_(nh) {
     server_ = std::make_unique<httplib::Server>();
     SetupPublishers(nh);
     SetupCommandClients(nh);
@@ -326,27 +326,19 @@ void HttpServer::HandleCommand(const httplib::Request& req, httplib::Response& r
     }
 
     if (command_mode == 1) {
-        ROS_INFO("Received /sendCommand from %s:%d on %s, siteId=%d, deviceId=%d, commandMode=%d, forwarding to service [%s]",
+        ROS_INFO("Received /sendCommand from %s:%d on %s, siteId=%d, deviceId=%d, commandMode=%d, launching all nodes for takeoff",
                  req.remote_addr.c_str(),
                  req.remote_port,
                  req.local_addr.c_str(),
                  site_id,
                  device_id,
-                 command_mode,
-                 service_name.c_str());
+                 command_mode);
+        LaunchNodesForTakeoff();
+        SendResult(res, 1);
+        return;
     }
 
     const bool success = CallCommandService(command_mode);
-
-    if (command_mode == 1) {
-        if (success) {
-            ROS_INFO("Frontend takeoff command forwarded successfully to state machine service [%s]",
-                     service_name.c_str());
-        } else {
-            ROS_WARN("Failed to forward frontend takeoff command to state machine service [%s]",
-                     service_name.c_str());
-        }
-    }
 
     SendResult(res, success ? 1 : 2);
 }
@@ -405,6 +397,54 @@ void HttpServer::SendResult(httplib::Response& res, int result_code) const {
     nlohmann::json body = {{"resultCode", result_code}};
     res.set_content(body.dump(), kJsonContentType);
     res.status = 200;
+}
+
+// 收到起飞命令时启动所有节点，30秒后自动发起飞指令
+void HttpServer::LaunchNodesForTakeoff() {
+    // 清理之前可能残留的定时器
+    takeoff_timer_.stop();
+
+    const std::string ws = ros::package::getPath("indooruav_http") + "/../..";
+    const std::string shell_dir = ws + "/src/shell";
+    const std::string mid360_ws = ws + "/../../MID360/catkin_ws";
+
+    // 1. 启动雷达节点 (MID360)
+    ROS_INFO("[Launch] Starting MID360 lidar...");
+    system(("roslaunch " + mid360_ws + "/src/livox_ros_driver2/launch_ROS1/msg_MID360.launch &").c_str());
+
+    // 2. 启动定位节点
+    ROS_INFO("[Launch] Starting localization...");
+    system(("bash " + shell_dir + "/bringup_localize.sh &").c_str());
+
+    // 3. 启动状态机节点
+    ROS_INFO("[Launch] Starting state machine...");
+    system(("bash " + shell_dir + "/bringup_indooruav_core.sh &").c_str());
+
+    // 4. 启动实物控制节点
+    ROS_INFO("[Launch] Starting hardware controller...");
+    system(("bash " + shell_dir + "/bringup_controller_hardware.sh &").c_str());
+
+    // 5. 启动航线跟踪节点
+    ROS_INFO("[Launch] Starting waypoint tracker...");
+    system(("bash " + shell_dir + "/bringup_waypoint_tracker.sh &").c_str());
+
+    // 6. 启动降落节点
+    ROS_INFO("[Launch] Starting landing node...");
+    system("roslaunch indooruav_mission bringup_mission.launch &");
+
+    // 7. 启动像素坐标发布脚本
+    const std::string pixel_script = ros::package::getPath("FASTLIO2_SAM_LC") + "/scripts/odometry_to_pixel.py";
+    ROS_INFO("[Launch] Starting pixel coordinate publisher...");
+    system(("python3 " + pixel_script + " &").c_str());
+
+    // 8. 30秒后自动发起飞指令
+    ROS_INFO("[Launch] Will send takeoff command in 30 seconds...");
+    takeoff_timer_ = nh_.createTimer(ros::Duration(30.0), &HttpServer::DelayedTakeoffCommand, this, /*oneshot=*/true);
+}
+
+void HttpServer::DelayedTakeoffCommand(const ros::TimerEvent& event) {
+    ROS_INFO("[Launch] 30s delay elapsed, sending takeoff command...");
+    CallCommandService(1);
 }
 
 }  // namespace indooruav_http
