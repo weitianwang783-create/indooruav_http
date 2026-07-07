@@ -1374,6 +1374,7 @@ void HttpClient::RunPostLandWorkflow() {
                  detect_time_cur.c_str());
     }
 
+    
     // 图片上传完毕，关闭所有起飞时启动的节点（逐个精确关闭）
     ROS_INFO("[Shutdown] Stopping all nodes one by one...");
 
