@@ -1392,9 +1392,9 @@ void HttpClient::RunPostLandWorkflow() {
     system("rosnode kill /waypoint_tracker_node 2>/dev/null");
     ROS_INFO("[Shutdown] waypoint tracker stopped");
 
-    // 4. 关闭实物控制节点
-    system("rosnode kill /controller_hardware 2>/dev/null");
-    ROS_INFO("[Shutdown] hardware controller stopped");
+    // 4. [已禁用] 实物控制节点由外部管理，关闭时不自动关闭
+    // system("rosnode kill /controller_hardware 2>/dev/null");
+    // ROS_INFO("[Shutdown] hardware controller stopped");
 
     // 5. 关闭状态机节点
     system("rosnode kill /indooruav_core 2>/dev/null");
@@ -1411,7 +1411,7 @@ void HttpClient::RunPostLandWorkflow() {
     // 8. 关掉 roslaunch 进程（rosnode kill 有时杀不干净）
     system("pkill -f bringup_localize.sh 2>/dev/null");
     system("pkill -f bringup_indooruav_core.sh 2>/dev/null");
-    system("pkill -f bringup_controller_hardware.sh 2>/dev/null");
+    // system("pkill -f bringup_controller_hardware.sh 2>/dev/null");  // 实物控制节点由外部管理，不在此关闭
     system("pkill -f bringup_waypoint_tracker.sh 2>/dev/null");
     system("pkill -f msg_MID360.launch 2>/dev/null");
     ROS_INFO("[Shutdown] all nodes stopped");

@@ -420,12 +420,13 @@ void HttpServer::LaunchNodesForTakeoff() {
     ROS_INFO("[Launch] Starting state machine...");
     system(("bash " + shell_dir + "/bringup_indooruav_core.sh &").c_str());
 
-    // 4. 设置 I2C 和串口权限，然后启动实物控制节点
-    ROS_INFO("[Launch] Setting device permissions...");
-    system("echo \"888888\" | sudo -S chmod 666 /dev/i2c-7");
-    system("echo \"888888\" | sudo -S chmod 777 /dev/ttyTHS0");
-    ROS_INFO("[Launch] Starting hardware controller...");
-    system(("bash " + shell_dir + "/bringup_controller_hardware.sh &").c_str());
+    // 4. [已禁用] 实物控制节点由外部管理，启动时不自动启动
+    //    设置 I2C 和串口权限（若实物控制节点已外部启动，权限已由外部设置）
+    // ROS_INFO("[Launch] Setting device permissions...");
+    // system("echo \"888888\" | sudo -S chmod 666 /dev/i2c-7");
+    // system("echo \"888888\" | sudo -S chmod 777 /dev/ttyTHS0");
+    // ROS_INFO("[Launch] Starting hardware controller...");
+    // system(("bash " + shell_dir + "/bringup_controller_hardware.sh &").c_str());
 
     // 5. 启动航线跟踪节点
     ROS_INFO("[Launch] Starting waypoint tracker...");
