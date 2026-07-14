@@ -1303,9 +1303,8 @@ void HttpClient::RunPostLandWorkflow() {
     GetCurrentMissionContext(&site_id, &device_id, &airline_key, &detect_time_cur);
 
     if (airline_key.empty() || detect_time_cur.empty()) {
-        ROS_WARN("Post-land workflow skipped because airlineKey or detectTimeCur from /airlineInfo is missing");
-        return;
-    }
+        ROS_WARN("Post-land workflow skipped because airlineKey or detectTimeCur from /airlineInfo is missing, shutting down nodes anyway");
+    } else {
 
     ROS_INFO("Post-land workflow started: detectTimeCur=%s, image_source_mode=%s, image_root=%s",
              detect_time_cur.c_str(),
@@ -1372,9 +1371,9 @@ void HttpClient::RunPostLandWorkflow() {
     } else {
         ROS_INFO("Post-land workflow sendPicOver succeeded for detectTimeCur=%s",
                  detect_time_cur.c_str());
+        }
     }
 
-    
     // 图片上传完毕，关闭所有起飞时启动的节点（逐个精确关闭）
     ROS_INFO("[Shutdown] Stopping all nodes one by one...");
 
