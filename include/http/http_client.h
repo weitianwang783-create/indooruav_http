@@ -31,7 +31,6 @@
 #include "indooruav_http/SendErrorData.h"
 #include "indooruav_http/SendFlyOver.h"
 #include "indooruav_http/SendPic.h"
-#include "indooruav_http/SendPicOver.h"
 #include "indooruav_http/TakeoffState.h"
 #include "indooruav_msgs/TransferMissionMedia.h"
 #include "indooruav_msgs/UploadImageBytes.h"
@@ -74,7 +73,6 @@ private:
 	HttpResult SendErrorData(const ErrorData& error_data);
 	HttpResult SendTakeoffState(int takeoff_state);
 	HttpResult SendFlyOver();
-	HttpResult SendPicOver();
 	HttpResult AirlineSync();
 	HttpResult SendPicBytesWithMission(int site_id,
 									   int device_id,
@@ -88,10 +86,6 @@ private:
 								  const std::string& airline_key,
 								  const std::string& detect_time_cur);
 	HttpResult SendFlyOverWithMission(int site_id,
-									  int device_id,
-									  const std::string& airline_key,
-									  const std::string& detect_time_cur);
-	HttpResult SendPicOverWithMission(int site_id,
 									  int device_id,
 									  const std::string& airline_key,
 									  const std::string& detect_time_cur);
@@ -114,6 +108,10 @@ private:
 									const std::string& detect_time_cur,
 									int* site_id,
 									int* device_id);
+	void ForwardAirlineInfoToRemoteController(int site_id,
+											 int device_id,
+											 const std::string& airline_key,
+											 const std::string& detect_time_cur);
 	std::vector<std::string> CollectPostLandImages(const std::string& detect_time_cur) const;
 	indooruav_msgs::TransferMissionMedia::Response TransferMissionMediaFromController(
 		const std::string& airline_key,
@@ -145,8 +143,6 @@ private:
 							 indooruav_http::SendErrorData::Response& res);
 	bool HandleSendFlyOver(indooruav_http::SendFlyOver::Request& req,
 						 indooruav_http::SendFlyOver::Response& res);
-	bool HandleSendPicOver(indooruav_http::SendPicOver::Request& req,
-						 indooruav_http::SendPicOver::Response& res);
 	bool HandleAirlineSync(indooruav_http::AirlineSync::Request& req,
 						   indooruav_http::AirlineSync::Response& res);
 	bool HandleRunPostLandWorkflow(std_srvs::Empty::Request& req,
@@ -166,6 +162,8 @@ private:
 	double takeoff_state_interval_ = 3.0;
 	std::string post_land_image_root_dir_;
 	std::string post_land_image_source_mode_;
+	std::string remote_controller_ip_;
+	int remote_controller_port_ = 20000;
 	std::string controller_upload_mission_media_service_;
 	std::string waypoint_save_raw_service_;
 
@@ -187,6 +185,8 @@ private:
 
 	std::unique_ptr<httplib::Client> client_;
 	std::mutex http_mutex_;
+	std::unique_ptr<httplib::Client> remote_controller_client_;
+	std::mutex remote_controller_http_mutex_;
 	std::atomic<bool> post_land_workflow_running_{false};
 	std::thread post_land_workflow_thread_;
 
@@ -243,7 +243,6 @@ private:
 	ros::ServiceServer set_takeoff_state_service_;
 	ros::ServiceServer send_error_data_service_;
 	ros::ServiceServer send_fly_over_service_;
-	ros::ServiceServer send_pic_over_service_;
 	ros::ServiceServer airline_sync_service_;
 	ros::ServiceServer run_post_land_workflow_service_;
 	ros::ServiceServer resend_all_airlines_service_;

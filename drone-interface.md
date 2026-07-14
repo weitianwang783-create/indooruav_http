@@ -174,38 +174,6 @@ D:/tycho/imgs/1/2025/07/01/20250701125959/2.png
 {"resultCode":1}
 ```
 
-### 2.3 `1.11 sendPicOver`
-
-用途：
-
-- 通知前端“本批次图片上传完成”
-
-请求格式：
-
-```text
-GET /sendPicOver?siteId=11&deviceId=1&airlineKey=AAAA&detectTimeCur=20250701125959
-```
-
-参数说明：
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `siteId` | int | 站点编号 |
-| `deviceId` | int | 设备编号 |
-| `airlineKey` | string | 当前任务标识 |
-| `detectTimeCur` | string | 当前检测时间 |
-
-返回示例：
-
-```json
-{"resultCode":1}
-```
-
-说明：
-
-- 手动调用 `/indooruav_http/send_pic` 后，不会自动触发 `1.11`
-- 自动降落后工作流结束时，会自动调用 `1.11`
-
 ## 3. 自动降落后回传工作流
 
 当前自动工作流触发点：
@@ -218,7 +186,6 @@ GET /sendPicOver?siteId=11&deviceId=1&airlineKey=AAAA&detectTimeCur=202507011259
 
 1. `1.9 sendFlyOver`
 2. 图片上传
-3. `1.11 sendPicOver`
 
 图片来源模式：
 
@@ -234,7 +201,6 @@ GET /sendPicOver?siteId=11&deviceId=1&airlineKey=AAAA&detectTimeCur=202507011259
 | Service | 类型 | 说明 |
 | --- | --- | --- |
 | `/indooruav_http/send_pic` | `indooruav_http/SendPic` | 手动上传本地图片 |
-| `/indooruav_http/send_pic_over` | `indooruav_http/SendPicOver` | 手动通知图片上传完成 |
 | `/indooruav_http/send_fly_over` | `indooruav_http/SendFlyOver` | 手动调用 1.9 |
 | `/indooruav_http/run_post_land_workflow` | `std_srvs/Empty` | 启动自动降落后回传流程 |
 | `/indooruav_http/upload_image_bytes` | `indooruav_msgs/UploadImageBytes` | 给 controller 传单张图片字节流的内部 service |
