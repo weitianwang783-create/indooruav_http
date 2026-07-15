@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -35,6 +36,7 @@ private:
 	void HandleAirlineInfo(const httplib::Request& req, httplib::Response& res);
 	void HandleCommand(const httplib::Request& req, httplib::Response& res);
 
+	void StateCallback(const std_msgs::String::ConstPtr& msg);
 	void LaunchNodesForTakeoff();
 	void DelayedTakeoffCommand(const ros::TimerEvent& event);
 
@@ -64,6 +66,10 @@ private:
 
 	ros::Timer takeoff_timer_;
 	std::vector<pid_t> launched_pids_;
+
+	ros::Subscriber state_sub_;
+	std::string current_state_{"Await"};
+	std::mutex state_mutex_;
 };
 
 }  // namespace indooruav_http

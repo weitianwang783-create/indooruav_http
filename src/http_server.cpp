@@ -80,6 +80,10 @@ HttpServer::HttpServer(ros::NodeHandle& nh, int port)
     SetupPublishers(nh);
     SetupCommandClients(nh);
     SetupRoutes();
+
+    // 订阅状态机状态，防止重复起飞
+    state_sub_ = nh_.subscribe("/indooruav_core/state_machine/state", 1,
+                                &HttpServer::StateCallback, this);
 }
 
 // 析构时停止HTTP服务
@@ -399,8 +403,24 @@ void HttpServer::SendResult(httplib::Response& res, int result_code) const {
     res.status = 200;
 }
 
+// 状态机状态回调，缓存当前状态
+void HttpServer::StateCallback(const std_msgs::String::ConstPtr& msg) {
+    std::lock_guard<std::mutex> lock(state_mutex_);
+    current_state_ = msg->data;
+}
+
 // 收到起飞命令时启动所有节点，30秒后自动发起飞指令
 void HttpServer::LaunchNodesForTakeoff() {
+    // 检查状态机状态，只有待机状态才允许起飞
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        if (current_state_ != "Await") {
+            ROS_WARN("[Launch] State machine is '%s', not Await, ignoring takeoff",
+                     current_state_.c_str());
+            return;
+        }
+    }
+
     // 清理之前可能残留的定时器
     takeoff_timer_.stop();
 
