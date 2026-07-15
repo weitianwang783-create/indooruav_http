@@ -73,11 +73,9 @@ ip route get 192.168.10.3 from 192.168.10.50
 - 缓存前端通过 `/airlineInfo` 下发的 `siteId`、`deviceId`、`airlineKey`、`detectTimeCur`
 - 前端通过 `/sendCommand?commandMode=1` 触发起飞事件
 - 通过 `/indooruav_http/send_pic` 上传单张本地图片
-- 通过 `/indooruav_http/send_pic_over` 通知图片批次上传完成
 - 在降落完成后自动执行：
   - `1.9 sendFlyOver`
   - `1.10 sendPic`
-  - `1.11 sendPicOver`
 - 自动传图支持两种图片来源模式：
   - `local_fs`：从机载电脑本地目录扫描图片后上传
   - `drone_sd_card`：通过 `indooruav_controller` 从无人机 SD 卡读取图片字节流后直接上传前端
@@ -152,6 +150,7 @@ rosrun indooruav_http indooruav_http_server _local_port:=20000
 说明：
 
 - `/airlineInfo` 会同步当前任务的 `siteId`、`deviceId`、`airlineKey`、`detectTimeCur`
+  - 配置了 `remote_controller_ip` 和 `remote_controller_port` 时，`indooruav_http_client` 会把相同字段转发给遥控器的 `GET /airlineInfo`
 - `commandMode=1` 当前表示起飞
 - 请求链路为：
   - 前端 `/sendCommand`
@@ -172,6 +171,8 @@ rosrun indooruav_http indooruav_http_client \
 
 - `server_ip` / `server_port`
   - 前端服务器地址
+- `remote_controller_ip` / `remote_controller_port`
+  - 遥控器 HTTP 服务地址；接收到航线选择后，转发相同的四个任务字段到遥控器的 `/airlineInfo`
 - `site_id` / `device_id`
   - 站点编号和设备编号
   - 作为默认值使用；一旦前端调用 `/airlineInfo`，后续机载上报会改用 `/airlineInfo` 里的 `siteId` 和 `deviceId`
@@ -232,7 +233,6 @@ sudo systemctl start radar-static-ip.service
 
 - `/indooruav_http/send_airline`
 - `/indooruav_http/send_pic`
-- `/indooruav_http/send_pic_over`
 - `/indooruav_http/send_fly_over`
 - `/indooruav_http/send_error_data`
 - `/indooruav_http/set_takeoff_state`
@@ -256,7 +256,6 @@ sudo systemctl start radar-static-ip.service
 
 - `1.9 sendFlyOver`
 - 图片上传
-- `1.11 sendPicOver`
 
 ### 3.4 雷达静态 IP 开机启动
 
@@ -298,7 +297,6 @@ sudo systemctl start radar-static-ip.service
 
 - `/indooruav_http/send_airline`
 - `/indooruav_http/send_pic`
-- `/indooruav_http/send_pic_over`
 - `/indooruav_http/send_fly_over`
 - `/indooruav_http/send_error_data`
 - `/indooruav_http/set_takeoff_state`
@@ -325,7 +323,6 @@ sudo systemctl start radar-static-ip.service
 - 读取本地文件
 - 使用当前缓存的 `airlineKey` 和 `detectTimeCur`
 - 调用前端 `POST /sendPic`
-- 不会自动触发 `1.11 sendPicOver`
 
 ### 4.2 自动回传图片命名规则
 
@@ -402,6 +399,8 @@ server_ip: "127.0.0.1"
 server_port: 8080
 site_id: 11
 device_id: 1
+remote_controller_ip: "192.168.1.200"
+remote_controller_port: 20000
 post_land_image_root_dir: "/tmp/indooruav_post_land_images"
 post_land_image_source_mode: "local_fs"
 controller_upload_mission_media_service: "/indooruav_controller/controller_hardware/upload_mission_photos_from_sd"
@@ -438,7 +437,6 @@ indooruav_controller:
 
 - `1.9 sendFlyOver`
 - `1.10 sendPic`
-- `1.11 sendPicOver`
 - 降落后的自动回传流程
 
 ### 6.1 终端 1：启动假前端服务器
@@ -582,7 +580,6 @@ find /tmp/fake_frontend_imgs -type f | sort
 [GET] /sendFlyOver?airlineKey=AAAA&detectTimeCur=20250701125959&deviceId=1&siteId=11
 [sendPic] saved: /tmp/fake_frontend_imgs/1/2025/07/01/20250701125959/1.png
 [sendPic] saved: /tmp/fake_frontend_imgs/1/2025/07/01/20250701125959/2.png
-[GET] /sendPicOver?airlineKey=AAAA&detectTimeCur=20250701125959&deviceId=1&siteId=11
 ```
 
 本地落盘结果应为：
@@ -612,7 +609,7 @@ rosservice call /indooruav_core/state_machine_event/land_complete
 正常情况下：
 
 - `indooruav_core` 会进入 `Charge`
-- `indooruav_http` 会自动执行 `1.9 -> 多次 1.10 -> 1.11`
+- `indooruav_http` 会自动执行 `1.9 -> 多次 1.10`
 
 ## 7. SD 卡直传模式说明
 
@@ -679,15 +676,7 @@ indooruav_controller:
 
 ## 8. 常见问题
 
-### 8.1 为什么手动 `send_pic` 之后没有自动调用 `1.11`
-
-这是当前设计如此：
-
-- 手动 `/indooruav_http/send_pic` 只负责上传单张图片
-- 不会自动调用 `/sendPicOver`
-- `1.11` 只在你手动调用 `/indooruav_http/send_pic_over`，或者自动降落后工作流结束时调用
-
-### 8.2 为什么重复上传图片有时失败
+### 8.1 为什么重复上传图片有时失败
 
 常见原因不是“同名覆盖”，而是：
 
@@ -698,7 +687,7 @@ indooruav_controller:
 
 当前客户端上传命名规则会在同一 `detectTimeCur` 下按 `1、2、3...` 递增，不会主动覆盖前一次的同名文件。
 
-### 8.3 自动回传为什么没触发
+### 8.2 自动回传为什么没触发
 
 最常见原因：
 
@@ -849,14 +838,12 @@ find /tmp/fake_frontend_imgs -type f | sort
 [GET] /sendFlyOver?...
 [sendPic] saved: /tmp/fake_frontend_imgs/1/YYYY/MM/DD/<detectTimeCur>/1.jpg
 [sendPic] saved: /tmp/fake_frontend_imgs/1/YYYY/MM/DD/<detectTimeCur>/2.jpg
-[GET] /sendPicOver?...
 ```
 
 这就说明：
 
 - `1.9` 调到了
 - SD 卡图片取出来并上传了
-- `1.11` 也调到了
 
 ### 9.8 如果你想先单独测“SD 卡取图”
 

@@ -99,6 +99,8 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
     nh_private.param<std::string>("post_land_image_source_mode",
                                   post_land_image_source_mode_,
                                   "local_fs");
+    nh_private.param<std::string>("remote_controller_ip", remote_controller_ip_, "");
+    nh_private.param<int>("remote_controller_port", remote_controller_port_, 20000);
     nh_private.param<std::string>("controller_upload_mission_media_service",
                                   controller_upload_mission_media_service_,
                                   "/indooruav_controller/controller_hardware/upload_mission_photos_from_sd");
@@ -144,6 +146,18 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
     nh_private.param<std::string>("ftp_remote_map_dir",
                                   ftp_remote_map_dir_,
                                   "/imgs/");
+    if (!remote_controller_ip_.empty() &&
+        remote_controller_port_ > 0 && remote_controller_port_ <= 65535) {
+        const std::string remote_controller_url =
+            "http://" + remote_controller_ip_ + ":" + std::to_string(remote_controller_port_);
+        remote_controller_client_ = std::make_unique<httplib::Client>(remote_controller_url.c_str());
+        remote_controller_client_->set_connection_timeout(3, 0);
+        remote_controller_client_->set_read_timeout(5, 0);
+        remote_controller_client_->set_write_timeout(5, 0);
+    } else if (!remote_controller_ip_.empty()) {
+        ROS_WARN("Remote controller forwarding disabled because port %d is invalid",
+                 remote_controller_port_);
+    }
     if (!waypoint_map2d_dir_.empty() && waypoint_map2d_dir_.front() != '/') {
         const std::string pkg_path = ros::package::getPath("FASTLIO2_SAM_LC");
         if (!pkg_path.empty()) {
@@ -254,10 +268,6 @@ void HttpClient::SetupServices(ros::NodeHandle& nh) {
     send_fly_over_service_ = nh.advertiseService(
         "/indooruav_http/send_fly_over",
         &HttpClient::HandleSendFlyOver,
-        this);
-    send_pic_over_service_ = nh.advertiseService(
-        "/indooruav_http/send_pic_over",
-        &HttpClient::HandleSendPicOver,
         this);
     airline_sync_service_ = nh.advertiseService(
         "/indooruav_http/airline_sync",
@@ -410,14 +420,21 @@ void HttpClient::AirlineInfoCallback(const std_msgs::String::ConstPtr& msg) {
             return;
         }
 
-        std::lock_guard<std::mutex> lock(airline_mutex_);
-        airline_info_site_id_ = site_id;
-        airline_info_device_id_ = device_id;
-        airline_info_airline_key_ = airline_key;
-        airline_info_detect_time_cur_ = detect_time_cur;
-        has_airline_info_context_ = true;
-        airline_key_ = airline_key;
-        detect_time_cur_ = detect_time_cur;
+        {
+            std::lock_guard<std::mutex> lock(airline_mutex_);
+            airline_info_site_id_ = site_id;
+            airline_info_device_id_ = device_id;
+            airline_info_airline_key_ = airline_key;
+            airline_info_detect_time_cur_ = detect_time_cur;
+            has_airline_info_context_ = true;
+            airline_key_ = airline_key;
+            detect_time_cur_ = detect_time_cur;
+        }
+
+        ForwardAirlineInfoToRemoteController(site_id,
+                                             device_id,
+                                             airline_key,
+                                             detect_time_cur);
     } catch (const std::exception& e) {
         ROS_WARN("Failed to parse airline info JSON: %s", e.what());
     }
@@ -506,6 +523,37 @@ bool HttpClient::ResolveTargetIdsForMission(const std::string& airline_key,
     }
 
     return false;
+}
+
+void HttpClient::ForwardAirlineInfoToRemoteController(int site_id,
+                                                      int device_id,
+                                                      const std::string& airline_key,
+                                                      const std::string& detect_time_cur) {
+    if (remote_controller_client_ == nullptr) {
+        return;
+    }
+
+    const httplib::Params params = {
+        {"siteId", std::to_string(site_id)},
+        {"deviceId", std::to_string(device_id)},
+        {"airlineKey", airline_key},
+        {"detectTimeCur", detect_time_cur},
+    };
+    const httplib::Headers headers;
+    std::lock_guard<std::mutex> lock(remote_controller_http_mutex_);
+    const httplib::Result result = remote_controller_client_->Get("/airlineInfo", params, headers);
+    if (!result || result->status < 200 || result->status >= 300) {
+        ROS_WARN("Failed to forward airline info to remote controller %s:%d",
+                 remote_controller_ip_.c_str(),
+                 remote_controller_port_);
+        return;
+    }
+
+    ROS_INFO("Forwarded airline info to remote controller %s:%d, airlineKey=%s, detectTimeCur=%s",
+             remote_controller_ip_.c_str(),
+             remote_controller_port_,
+             airline_key.c_str(),
+             detect_time_cur.c_str());
 }
 
 void HttpClient::TakeoffStateTopicCallback(const std_msgs::Int32::ConstPtr& msg) {
@@ -754,37 +802,6 @@ HttpResult HttpClient::SendFlyOverWithMission(int site_id,
     }
 
     std::string path = "/sendFlyOver?siteId=" + std::to_string(site_id) +
-                       "&deviceId=" + std::to_string(device_id) +
-                       "&airlineKey=" + airline_key +
-                       "&detectTimeCur=" + detect_time_cur;
-
-    std::lock_guard<std::mutex> lock(http_mutex_);
-    return ParseResult(client_->Get(path.c_str()));
-}
-
-HttpResult HttpClient::SendPicOver() {
-    int site_id = 0;
-    int device_id = 0;
-    std::string airline_key;
-    std::string detect_time_cur;
-    GetCurrentMissionContext(&site_id, &device_id, &airline_key, &detect_time_cur);
-
-    return SendPicOverWithMission(site_id, device_id, airline_key, detect_time_cur);
-}
-
-HttpResult HttpClient::SendPicOverWithMission(int site_id,
-                                              int device_id,
-                                              const std::string& airline_key,
-                                              const std::string& detect_time_cur) {
-    if (site_id <= 0 || device_id <= 0 ||
-        airline_key.empty() || detect_time_cur.empty()) {
-        ROS_WARN("sendPicOver skipped because siteId, deviceId, airlineKey, or detectTimeCur from /airlineInfo is missing");
-        HttpResult result;
-        result.result_code = 3;
-        return result;
-    }
-
-    std::string path = "/sendPicOver?siteId=" + std::to_string(site_id) +
                        "&deviceId=" + std::to_string(device_id) +
                        "&airlineKey=" + airline_key +
                        "&detectTimeCur=" + detect_time_cur;
@@ -1361,17 +1378,6 @@ void HttpClient::RunPostLandWorkflow() {
         }
     }
 
-    const HttpResult pic_over_result = SendPicOverWithMission(site_id,
-                                                              device_id,
-                                                              airline_key,
-                                                              detect_time_cur);
-    if (pic_over_result.result_code != 1) {
-        ROS_WARN("Post-land workflow sendPicOver failed with resultCode=%d",
-                 pic_over_result.result_code);
-    } else {
-        ROS_INFO("Post-land workflow sendPicOver succeeded for detectTimeCur=%s",
-                 detect_time_cur.c_str());
-        }
     }
 
     // 图片上传完毕，关闭所有起飞时启动的节点（逐个精确关闭）
@@ -1546,14 +1552,6 @@ bool HttpClient::HandleSendFlyOver(indooruav_http::SendFlyOver::Request& req,
                                    indooruav_http::SendFlyOver::Response& res) {
     (void)req;
     HttpResult result = SendFlyOver();
-    res.result_code = result.result_code;
-    return true;
-}
-
-bool HttpClient::HandleSendPicOver(indooruav_http::SendPicOver::Request& req,
-                                   indooruav_http::SendPicOver::Response& res) {
-    (void)req;
-    HttpResult result = SendPicOver();
     res.result_code = result.result_code;
     return true;
 }

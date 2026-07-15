@@ -25,7 +25,6 @@ add_service_files(
   TakeoffState.srv
   SendErrorData.srv
   SendFlyOver.srv
-  SendPicOver.srv
   AirlineSync.srv
   CacheAirlineMeta.srv
 )

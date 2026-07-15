@@ -259,7 +259,7 @@ http://ip:port/sendFlyOver?siteId=11&deviceId=1&airlineKey=AAAA&detectTimeCur=20
 | --- |
 
 
-1.10 sendPic`
+#请无视这个接口1.10 sendPic
 
 用途：
 
@@ -320,30 +320,6 @@ D:/tycho/imgs/1/2025/07/01/20250701125959/2.png
 ```json
 {"resultCode":1}
 ```
-
-## 1.11、上传图片完成
-
-http://ip:port/sendPicOver?siteId=11&deviceId=1&airlineKey =1&takeoffState=1&detectTimeCur=20250701125959
-
-协议属性说明：
-
-| 属性名 | 类型 | 描述 |
-| --- | --- | --- |
-| siteId | int | 站点ID，需可设置，默认11 |
-| deviceId | int | 设备ID，需可设置，默认1 |
-| airlineKey | String | 当前航线唯一标识 |
-| detectTimeCur | String | 检测时间，格式：20250701125959 |
-
-返回值对象属性说明：
-
-| 属性名 | 类型 | 描述 |
-| --- | --- | --- |
-| resultCode | Integer | 请求结果:1 成功，2 失败，3 数据格式不正确 |
-
-返回值格式：
-
-| { "resultCode": 1 } |
-| --- |
 
 ## 1.14、航线信息同步
 
