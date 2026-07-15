@@ -1,9 +1,9 @@
 # Parameters for indooruav_http_client (private namespace)
-server_ip: "192.168.1.107"
+server_ip: "10.29.3.171"
 server_port: 7000
 site_id: 11
 device_id: 1
-flight_state_interval: 3.0
+flight_state_interval: 3.0                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
 flight_state_sample_rate: 1
 takeoff_state_interval: 3.0
 odom_topic: "/Odometry_global"
@@ -22,7 +22,7 @@ default_waypoint_yscale: 15.8
 default_waypoint_xzero: 0.0
 default_waypoint_yzero: 0.0
 waypoint_map2d_dir: "/home/indooruav/Project/IndoorUavInspection2/catkin_ws/src/FASTLIO2_SAM_LC/map2d"
-ftp_server_ip: "192.168.1.107"
+ftp_server_ip: "10.29.3.171"
 ftp_server_port: 2121   # FTP服务器端口
 ftp_user: "tycho"
 ftp_password: "TychoImg@2026"
