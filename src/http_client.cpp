@@ -110,6 +110,9 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
     nh_private.param<std::string>("waypoint_yaml_dir",
                                   waypoint_yaml_dir_,
                                   "config");
+    nh_private.param<std::string>("waypoint_pixel_dir",
+                                  waypoint_pixel_dir_,
+                                  "waypoints_pixel");
     nh_private.param<double>("waypoint_poll_interval_sec",
                              waypoint_poll_interval_sec_,
                              5.0);
@@ -170,6 +173,15 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
             waypoint_yaml_dir_ = JoinPath(pkg_path, waypoint_yaml_dir_);
         }
     }
+    if (!waypoint_pixel_dir_.empty() && waypoint_pixel_dir_.front() != '/') {
+        const std::string pkg_path = ros::package::getPath("indooruav_waypoint");
+        if (!pkg_path.empty()) {
+            waypoint_pixel_dir_ = JoinPath(pkg_path, waypoint_pixel_dir_);
+        }
+    }
+    ROS_INFO("Waypoint polling watches pixel dir [%s], airline YAML dir [%s]",
+             waypoint_pixel_dir_.c_str(),
+             waypoint_yaml_dir_.c_str());
 
     {
         const std::string mtime_file = JoinPath(waypoint_yaml_dir_, ".airline_mtime.json");
@@ -1039,7 +1051,47 @@ void HttpClient::FillWaypointPxPy(Waypoint& waypoint) const {
     }
 }
 
+// 读取 waypoints_pixel/xxx_pixel.yaml，按行解析 px/py
+bool HttpClient::LoadWaypointPixelFile(const std::string& pixel_path,
+                                       std::vector<std::pair<double, double>>* pixels) const {
+    if (pixels == nullptr) {
+        return false;
+    }
+    pixels->clear();
+
+    std::ifstream in(pixel_path);
+    if (!in.is_open()) {
+        ROS_WARN("Pixel file not readable: %s (px/py will be 0)", pixel_path.c_str());
+        return false;
+    }
+
+    std::string line;
+    while (std::getline(in, line)) {
+        line.erase(0, line.find_first_not_of(" \t\r\n"));
+        const std::size_t last = line.find_last_not_of(" \t\r\n");
+        if (last == std::string::npos) {
+            continue;
+        }
+        line.erase(last + 1);
+        if (line.empty()) {
+            continue;
+        }
+        try {
+            YAML::Node doc = YAML::Load(line);
+            if (doc["px"] && doc["py"]) {
+                pixels->emplace_back(doc["px"].as<double>(), doc["py"].as<double>());
+            }
+        } catch (const YAML::Exception&) {
+            // skip malformed line
+        }
+    }
+
+    ROS_INFO("Loaded %zu pixel coordinates from %s", pixels->size(), pixel_path.c_str());
+    return true;
+}
+
 bool HttpClient::BuildRecordedWaypointAirlineFromYaml(const std::string& yaml_path,
+                                                  const std::string& pixel_path,
                                                   Airline* airline,
                                                   size_t* manual_waypoint_count,
                                                   std::string* error_message) const {
@@ -1074,6 +1126,10 @@ airline->airline_map = "/P_P/" + basename + ".png";
         airline->waypoint_list.clear();
         *manual_waypoint_count = 0;
 
+        // 每次构建都重新读取像素文件，避免缓存导致 px/py 过期
+        std::vector<std::pair<double, double>> pixels;
+        LoadWaypointPixelFile(pixel_path, &pixels);
+
         for (std::size_t i = 0; i < waypoints.size(); ++i) {
             const YAML::Node node = waypoints[i];
             const bool stop = node["stop"] ? node["stop"].as<bool>() : false;
@@ -1087,42 +1143,12 @@ airline->airline_map = "/P_P/" + basename + ".png";
             waypoint.waypointz = node["z"].as<double>();
             waypoint.angle = node["yaw_deg"].as<double>();
             waypoint.distance = 0.0;
-            // 从 waypoints_pixel 目录读取对应像素文件，按 stop=true 的索引顺序填充 px,py
+            // 按 stop=true 的索引顺序填充 px,py
             {
-                static std::string cached_pixel_basename;
-                static std::vector<std::pair<double, double>> cached_pixels;
-                if (cached_pixel_basename != basename) {
-                    cached_pixel_basename = basename;
-                    cached_pixels.clear();
-                    const std::string pixel_dir = ros::package::getPath("indooruav_waypoint") + "/waypoints_pixel/";
-                    const std::string pixel_file = pixel_dir + basename + "_pixel.yaml";
-                    std::ifstream in(pixel_file);
-                    if (!in.is_open()) {
-                        ROS_WARN("Pixel file not found: %s (px/py will be 0)", pixel_file.c_str());
-                    } else {
-                        std::string line;
-                        while (std::getline(in, line)) {
-                            line.erase(0, line.find_first_not_of(" \t\r\n"));
-                            line.erase(line.find_last_not_of(" \t\r\n") + 1);
-                            if (line.empty()) continue;
-                            try {
-                                YAML::Node doc = YAML::Load(line);
-                                if (doc["px"] && doc["py"]) {
-                                    cached_pixels.emplace_back(doc["px"].as<double>(),
-                                                               doc["py"].as<double>());
-                                }
-                            } catch (const YAML::Exception&) {
-                                // skip malformed line
-                            }
-                        }
-                        ROS_INFO("Loaded %zu pixel coordinates from %s",
-                                 cached_pixels.size(), pixel_file.c_str());
-                    }
-                }
                 const size_t pixel_idx = *manual_waypoint_count;
-                if (pixel_idx < cached_pixels.size()) {
-                    waypoint.px = cached_pixels[pixel_idx].first;
-                    waypoint.py = cached_pixels[pixel_idx].second;
+                if (pixel_idx < pixels.size()) {
+                    waypoint.px = pixels[pixel_idx].first;
+                    waypoint.py = pixels[pixel_idx].second;
                 }
             }
             waypoint.point_id = static_cast<int>(*manual_waypoint_count) + 1;
@@ -1149,65 +1175,83 @@ void HttpClient::WaypointPollTimerCallback(const ros::TimerEvent& event) {
     ScanAndSendWaypointAirlines();
 }
 
+// 轮询 waypoints_pixel 目录：只有像素文件就绪(或更新)才上报对应航线
 void HttpClient::ScanAndSendWaypointAirlines() {
     struct stat dir_stat;
-    if (stat(waypoint_yaml_dir_.c_str(), &dir_stat) != 0 || !S_ISDIR(dir_stat.st_mode)) {
-        ROS_WARN_THROTTLE(30.0, "Waypoint YAML directory not found: %s",
-                          waypoint_yaml_dir_.c_str());
+    if (stat(waypoint_pixel_dir_.c_str(), &dir_stat) != 0 || !S_ISDIR(dir_stat.st_mode)) {
+        ROS_WARN_THROTTLE(30.0, "Waypoint pixel directory not found: %s",
+                          waypoint_pixel_dir_.c_str());
         return;
     }
 
-    DIR* dir = opendir(waypoint_yaml_dir_.c_str());
+    DIR* dir = opendir(waypoint_pixel_dir_.c_str());
     if (dir == nullptr) {
-        ROS_WARN_THROTTLE(30.0, "Failed to open waypoint YAML directory: %s",
-                          waypoint_yaml_dir_.c_str());
+        ROS_WARN_THROTTLE(30.0, "Failed to open waypoint pixel directory: %s",
+                          waypoint_pixel_dir_.c_str());
         return;
     }
+
+    const std::string kPixelSuffix = "_pixel.yaml";
 
     while (const dirent* entry = readdir(dir)) {
         const std::string name(entry->d_name);
         if (name == "." || name == "..") {
             continue;
         }
-        if (name.size() <= 5 || name.compare(name.size() - 5, 5, ".yaml") != 0) {
-            continue;
-        }
         if (entry->d_type == DT_DIR) {
             continue;
         }
-        if (name == "config.yaml") {
+        if (name.size() <= kPixelSuffix.size() ||
+            name.compare(name.size() - kPixelSuffix.size(),
+                         kPixelSuffix.size(),
+                         kPixelSuffix) != 0) {
             continue;
         }
 
-        const std::string full_path = JoinPath(waypoint_yaml_dir_, name);
-
-        struct stat file_stat;
-        if (stat(full_path.c_str(), &file_stat) != 0 || !S_ISREG(file_stat.st_mode)) {
+        const std::string pixel_path = JoinPath(waypoint_pixel_dir_, name);
+        struct stat pixel_stat;
+        if (stat(pixel_path.c_str(), &pixel_stat) != 0 || !S_ISREG(pixel_stat.st_mode)) {
             continue;
         }
-        const std::time_t current_mtime = file_stat.st_mtime;
+
+        // xxx_pixel.yaml -> xxx，再到航线目录里找 xxx.yaml
+        const std::string basename = name.substr(0, name.size() - kPixelSuffix.size());
+        const std::string yaml_path = JoinPath(waypoint_yaml_dir_, basename + ".yaml");
+        struct stat yaml_stat;
+        if (stat(yaml_path.c_str(), &yaml_stat) != 0 || !S_ISREG(yaml_stat.st_mode)) {
+            ROS_WARN_THROTTLE(30.0,
+                              "Pixel file [%s] has no matching waypoint YAML: %s",
+                              pixel_path.c_str(), yaml_path.c_str());
+            continue;
+        }
+
+        // 像素文件或航线文件任一更新都重新上报
+        const std::time_t current_mtime =
+            std::max(pixel_stat.st_mtime, yaml_stat.st_mtime);
 
         {
             std::lock_guard<std::mutex> lock(waypoint_poll_mutex_);
-            auto it = waypoint_file_mtime_store_.find(full_path);
+            auto it = waypoint_file_mtime_store_.find(pixel_path);
             if (it != waypoint_file_mtime_store_.end() && it->second == current_mtime) {
                 continue;
             }
         }
 
-        TrySendWaypointAirlineFromFile(full_path, current_mtime);
+        TrySendWaypointAirlineFromFile(yaml_path, pixel_path, current_mtime);
     }
 
     closedir(dir);
 }
 
 bool HttpClient::TrySendWaypointAirlineFromFile(const std::string& yaml_path,
+                                                 const std::string& pixel_path,
                                                  std::time_t current_mtime) {
     Airline airline;
     size_t manual_waypoint_count = 0;
     std::string error_message;
 
     if (!BuildRecordedWaypointAirlineFromYaml(yaml_path,
+                                              pixel_path,
                                               &airline,
                                               &manual_waypoint_count,
                                               &error_message)) {
@@ -1215,7 +1259,7 @@ bool HttpClient::TrySendWaypointAirlineFromFile(const std::string& yaml_path,
                  yaml_path.c_str(), error_message.c_str());
         {
             std::lock_guard<std::mutex> lock(waypoint_poll_mutex_);
-            waypoint_file_mtime_store_[yaml_path] = current_mtime;
+            waypoint_file_mtime_store_[pixel_path] = current_mtime;
         }
         return false;
     }
@@ -1229,7 +1273,7 @@ bool HttpClient::TrySendWaypointAirlineFromFile(const std::string& yaml_path,
 
     {
         std::lock_guard<std::mutex> lock(waypoint_poll_mutex_);
-        waypoint_file_mtime_store_[yaml_path] = current_mtime;
+        waypoint_file_mtime_store_[pixel_path] = current_mtime;
 
         const std::string mtime_file = JoinPath(waypoint_yaml_dir_, ".airline_mtime.json");
         try {

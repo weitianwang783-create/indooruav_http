@@ -10,6 +10,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <ros/ros.h>
@@ -117,12 +118,17 @@ private:
 		const std::string& airline_key,
 		const std::string& detect_time_cur);
 	void FillWaypointPxPy(Waypoint& waypoint) const;
+	bool LoadWaypointPixelFile(const std::string& pixel_path,
+							   std::vector<std::pair<double, double>>* pixels) const;
 	bool BuildRecordedWaypointAirlineFromYaml(const std::string& yaml_path,
+							  const std::string& pixel_path,
 							  Airline* airline,
 							  size_t* manual_waypoint_count,
 							  std::string* error_message) const;
 	void ScanAndSendWaypointAirlines();
-	bool TrySendWaypointAirlineFromFile(const std::string& yaml_path, std::time_t current_mtime);
+	bool TrySendWaypointAirlineFromFile(const std::string& yaml_path,
+										const std::string& pixel_path,
+										std::time_t current_mtime);
 	bool FtpUploadMapImage(const std::string& map_name);
 	void StartPostLandWorkflow();
 	void RunPostLandWorkflow();
@@ -168,6 +174,7 @@ private:
 	std::string waypoint_save_raw_service_;
 
 	std::string waypoint_yaml_dir_;
+	std::string waypoint_pixel_dir_;
 	double waypoint_poll_interval_sec_ = 5.0;
 	double default_waypoint_xscale_ = 15.8;
 	double default_waypoint_yscale_ = 15.8;
