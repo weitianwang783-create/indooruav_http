@@ -1164,20 +1164,6 @@ void HttpClient::ScanAndSendWaypointAirlines() {
         return;
     }
 
-    // 从 waypoint_yaml_dir_ 推导像素文件目录
-    // waypoint_yaml_dir_ 如 /home/.../indooruav_waypoint/waypoints
-    // pixel_dir 为 /home/.../indooruav_waypoint/waypoints_pixel/
-    std::string pixel_dir = waypoint_yaml_dir_;
-    if (!pixel_dir.empty() && pixel_dir.back() == '/') {
-        pixel_dir.pop_back();
-    }
-    auto last_sep = pixel_dir.find_last_of('/');
-    if (last_sep != std::string::npos) {
-        pixel_dir = pixel_dir.substr(0, last_sep + 1) + "waypoints_pixel/";
-    } else {
-        pixel_dir = "waypoints_pixel/";
-    }
-
     while (const dirent* entry = readdir(dir)) {
         const std::string name(entry->d_name);
         if (name == "." || name == "..") {
@@ -1199,16 +1185,7 @@ void HttpClient::ScanAndSendWaypointAirlines() {
         if (stat(full_path.c_str(), &file_stat) != 0 || !S_ISREG(file_stat.st_mode)) {
             continue;
         }
-
-        // 改为监听像素文件 (_pixel.yaml) 的修改时间
-        // 像素文件不存在时回退到航线文件的修改时间
-        std::string basename = name.substr(0, name.size() - 5);
-        const std::string pixel_path = pixel_dir + basename + "_pixel.yaml";
-        struct stat pixel_stat;
-        const std::time_t current_mtime =
-            (stat(pixel_path.c_str(), &pixel_stat) == 0 && S_ISREG(pixel_stat.st_mode))
-                ? pixel_stat.st_mtime
-                : file_stat.st_mtime;
+        const std::time_t current_mtime = file_stat.st_mtime;
 
         {
             std::lock_guard<std::mutex> lock(waypoint_poll_mutex_);
