@@ -56,7 +56,7 @@ std::string JoinPath(const std::string& left, const std::string& right) {
     return left + "/" + right;
 }
 
-}  // namespace
+}  // namespace1
 
 HttpClient::HttpClient(ros::NodeHandle& nh,
                        const std::string& server_ip,
