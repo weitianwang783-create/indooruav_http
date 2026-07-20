@@ -1,5 +1,5 @@
 # Parameters for indooruav_http_client (private namespace)
-server_ip: "10.29.3.171"
+server_ip: "10.179.130.8"
 server_port: 7000
 site_id: 11
 device_id: 1
@@ -12,11 +12,11 @@ odom_waypoints_id_topic: "/Odometry_waypointsid"
 odom_fallback_topic: "/Odometry"
 post_land_image_root_dir: "/tmp/indooruav_post_land_images"
 post_land_image_source_mode: "drone_sd_card"
-remote_controller_ip: ""
-remote_controller_port: 20000
+remote_controller_ip: "10.29.3.170"
+remote_controller_port: 20032
 controller_upload_mission_media_service: "/indooruav_controller/controller_hardware/upload_mission_photos_from_sd"
 
-waypoint_save_raw_service: "indooruav_controller/waypoint_recorder/save_raw"
+waypoint_save_raw_service: "indooruav_controllear/waypoint_recorder/save_raw"
 waypoint_yaml_dir: "waypoints"
 waypoint_poll_interval_sec: 5.0
 default_waypoint_xscale: 15.8
@@ -24,7 +24,7 @@ default_waypoint_yscale: 15.8
 default_waypoint_xzero: 0.0
 default_waypoint_yzero: 0.0
 waypoint_map2d_dir: "/home/indooruav/Project/IndoorUavInspection2/catkin_ws/src/FASTLIO2_SAM_LC/map2d"
-ftp_server_ip: "10.29.3.171"
+ftp_server_ip: "10.179.130.8"
 ftp_server_port: 2121   # FTP服务器端口
 ftp_user: "tycho"
 ftp_password: "TychoImg@2026"

@@ -26,6 +26,8 @@ const char* kRunPostLandWorkflowService = "/indooruav_http/run_post_land_workflo
 const char* kUploadImageBytesService = "/indooruav_http/upload_image_bytes";
 const char* kCacheAirlineMetaService = "/indooruav_http/cache_airline_meta";
 const char* kWaypointSaveProxyService = "indooruav_controller/waypoint_recorder/save";
+constexpr int kSendAirlineSiteId = 11;
+constexpr int kSendAirlineDeviceId = 1;
 std::mutex g_upload_sequence_mutex;
 std::unordered_map<std::string, int> g_next_upload_sequence_by_detect_time;
 
@@ -620,12 +622,8 @@ HttpResult HttpClient::SendAirline(const Airline& airline) {
         return result;
     }
 
-    int site_id = 0;
-    int device_id = 0;
-    GetCurrentTargetIds(&site_id, &device_id);
-
-    std::string path = "/sendAirline?siteId=" + std::to_string(site_id) +
-                       "&deviceId=" + std::to_string(device_id);
+    std::string path = "/sendAirline?siteId=" + std::to_string(kSendAirlineSiteId) +
+                       "&deviceId=" + std::to_string(kSendAirlineDeviceId);
 
     const std::string file_body = airline.ToJson().dump();
     httplib::UploadFormDataItems items;
