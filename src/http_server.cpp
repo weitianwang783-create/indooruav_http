@@ -243,7 +243,7 @@ void HttpServer::HandleAirlineInfo(const httplib::Request& req, httplib::Respons
     }
 
     const std::string config_yaml = waypoint_pkg + "/config/config.yaml";
-    const std::string localize_yaml = ros::package::getPath("fastlio") + "/config/localize.yaml";
+    const std::string localize_yaml = ros::package::getPath("indooruav_localize") + "/config/localize.yaml";
 
     if (!UpdateYamlValue(config_yaml, "waypoints_file_path", "waypoints/" + airline_key + ".yaml")) {
         ROS_ERROR("Failed to update waypoints_file_path in %s", config_yaml.c_str());
@@ -456,7 +456,7 @@ void HttpServer::LaunchNodesForTakeoff() {
     ROS_INFO("[Launch] Starting landing node...");
     system("roslaunch indooruav_mission bringup_mission.launch &");
 
-    // 7. 启动像素坐标发布脚本（用硬编码路径，因为 indooruav_localize 的 ROS 包名为 fastlio 小写）
+    // 7. 启动像素坐标发布脚本（用硬编码路径，直接指向 indooruav_localize/scripts）
     const std::string pixel_script = std::string(getenv("HOME")) + "/Project/IndoorUavInspection2/catkin_ws/src/indooruav_localize/scripts/odometry_to_pixel.py";
     ROS_INFO("[Launch] Starting pixel coordinate publisher: %s", pixel_script.c_str());
     system(("python3 " + pixel_script + " &").c_str());
