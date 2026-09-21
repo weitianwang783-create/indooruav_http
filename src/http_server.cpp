@@ -456,8 +456,8 @@ void HttpServer::LaunchNodesForTakeoff() {
     ROS_INFO("[Launch] Starting landing node...");
     system("roslaunch indooruav_mission bringup_mission.launch &");
 
-    // 7. 启动像素坐标发布脚本（用硬编码路径，因为 FASTLIO2_SAM_LC 的 ROS 包名为 fastlio 小写）
-    const std::string pixel_script = std::string(getenv("HOME")) + "/Project/IndoorUavInspection2/catkin_ws/src/FASTLIO2_SAM_LC/scripts/odometry_to_pixel.py";
+    // 7. 启动像素坐标发布脚本（用硬编码路径，因为 indooruav_localize 的 ROS 包名为 fastlio 小写）
+    const std::string pixel_script = std::string(getenv("HOME")) + "/Project/IndoorUavInspection2/catkin_ws/src/indooruav_localize/scripts/odometry_to_pixel.py";
     ROS_INFO("[Launch] Starting pixel coordinate publisher: %s", pixel_script.c_str());
     system(("python3 " + pixel_script + " &").c_str());
 

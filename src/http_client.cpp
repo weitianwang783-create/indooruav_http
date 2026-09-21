@@ -162,7 +162,7 @@ HttpClient::HttpClient(ros::NodeHandle& nh,
                  remote_controller_port_);
     }
     if (!waypoint_map2d_dir_.empty() && waypoint_map2d_dir_.front() != '/') {
-        const std::string pkg_path = ros::package::getPath("FASTLIO2_SAM_LC");
+        const std::string pkg_path = ros::package::getPath("fastlio");
         if (!pkg_path.empty()) {
             waypoint_map2d_dir_ = JoinPath(pkg_path, waypoint_map2d_dir_);
         }
