@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(head -30 /home/indooruav/Project/IndoorUavInspection2/catkin_ws/src/indooruav_waypoint/config/waypoints.yaml)",
+      "Read(//home/indooruav/Project/IndoorUavInspection2/catkin_ws/src/indooruav_waypoint/config/**)",
+      "Bash(head -10 /home/indooruav/Project/IndoorUavInspection2/catkin_ws/src/indooruav_waypoint/config/waypoints821.yaml)"
+    ]
+  }
+}
