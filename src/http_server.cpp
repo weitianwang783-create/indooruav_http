@@ -425,7 +425,7 @@ void HttpServer::LaunchNodesForTakeoff() {
     takeoff_timer_.stop();
 
     const std::string ws = ros::package::getPath("indooruav_http") + "/../..";
-    const std::string shell_dir = ws + "/src/shell";
+    const std::string shell_dir = ws + "/src/indooruav_core/shell";
     const std::string three_d_ws = std::string(std::getenv("HOME")) + "/Project/3D/catkin_ws";
 
     // 1. 启动雷达节点 (MID360)
