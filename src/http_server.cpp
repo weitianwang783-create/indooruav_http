@@ -1,7 +1,9 @@
 #include "http/http_server.h"
 
 #include <chrono>
+#include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <nlohmann/json.hpp>
 #include <sstream>
 
@@ -69,6 +71,211 @@ bool UpdateYamlValue(const std::string& file_path, const std::string& key,
     }
     out.close();
     return true;
+}
+
+// 按候选参数名依次查找请求参数（兼容文档 URL 中 siteId/deviceId/pointId 的
+// siteld/deviceld/pointid 写法），未找到返回空串
+std::string FindParam(const httplib::Request& req,
+                      std::initializer_list<const char*> keys) {
+    for (const char* key : keys) {
+        if (req.has_param(key)) {
+            return req.get_param_value(key);
+        }
+    }
+    return "";
+}
+
+bool ParseIntValue(const std::string& raw, int* value) {
+    if (raw.empty() || value == nullptr) {
+        return false;
+    }
+    try {
+        size_t consumed = 0;
+        const int parsed = std::stoi(raw, &consumed);
+        if (consumed != raw.size()) {
+            return false;
+        }
+        *value = parsed;
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+bool ParseDoubleValue(const std::string& raw, double* value) {
+    if (raw.empty() || value == nullptr) {
+        return false;
+    }
+    try {
+        size_t consumed = 0;
+        const double parsed = std::stod(raw, &consumed);
+        if (consumed != raw.size() || !std::isfinite(parsed)) {
+            return false;
+        }
+        *value = parsed;
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+// 将航点文件中的第 point_id 个停留航点的 yaw_deg 修改为 angle_deg。
+// point_id 与 http_client 上报给平台的 waypointList 编号保持一致：
+// 只统计 stop: true 的航点，按文件中的出现顺序从 1 开始编号。
+// 优先逐行改写，尽量保留录制文件的注释与排版；定位失败时退回整文件重写。
+bool UpdateWaypointYawDeg(const std::string& file_path, int point_id,
+                          double angle_deg, std::string* error) {
+    if (error != nullptr) {
+        error->clear();
+    }
+
+    YAML::Node root;
+    try {
+        root = YAML::LoadFile(file_path);
+    } catch (const YAML::Exception& e) {
+        if (error != nullptr) {
+            *error = std::string("YAML parse error: ") + e.what();
+        }
+        return false;
+    }
+
+    const YAML::Node waypoints = root["waypoints"];
+    if (!waypoints || !waypoints.IsSequence()) {
+        if (error != nullptr) {
+            *error = "missing or non-sequence 'waypoints' field";
+        }
+        return false;
+    }
+
+    int target_index = -1;
+    int stop_index = 0;
+    try {
+        for (std::size_t i = 0; i < waypoints.size(); ++i) {
+            const bool stop = waypoints[i]["stop"] ? waypoints[i]["stop"].as<bool>() : false;
+            if (!stop) {
+                continue;
+            }
+            if (++stop_index == point_id) {
+                target_index = static_cast<int>(i);
+                break;
+            }
+        }
+    } catch (const YAML::Exception& e) {
+        if (error != nullptr) {
+            *error = std::string("malformed waypoint entry: ") + e.what();
+        }
+        return false;
+    }
+
+    if (target_index < 0) {
+        if (error != nullptr) {
+            *error = "pointId " + std::to_string(point_id) + " not found";
+        }
+        return false;
+    }
+
+    std::ifstream in(file_path);
+    if (!in.is_open()) {
+        if (error != nullptr) {
+            *error = "cannot open file for update";
+        }
+        return false;
+    }
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(in, line)) {
+        lines.push_back(line);
+    }
+    in.close();
+
+    // getline 会丢掉文件末尾的换行，记录后原样写回
+    bool has_trailing_newline = false;
+    {
+        std::ifstream tail(file_path, std::ios::binary | std::ios::ate);
+        if (tail.is_open() && tail.tellg() > 0) {
+            tail.seekg(-1, std::ios::end);
+            char last_char = 0;
+            if (tail.get(last_char)) {
+                has_trailing_newline = (last_char == '\n');
+            }
+        }
+    }
+
+    const std::string yaw_key = "yaw_deg:";
+    std::ostringstream value_stream;
+    value_stream << std::fixed << std::setprecision(2) << angle_deg;
+    const std::string new_value = value_stream.str();
+
+    int occurrence = 0;
+    bool updated = false;
+    for (auto& l : lines) {
+        const size_t first_non_space = l.find_first_not_of(" \t");
+        if (first_non_space == std::string::npos || l[first_non_space] == '#') {
+            continue;  // 跳过空行与注释行
+        }
+        const size_t key_pos = l.find(yaw_key);
+        if (key_pos == std::string::npos) {
+            continue;
+        }
+        if (occurrence++ != target_index) {
+            continue;
+        }
+
+        const size_t val_begin = l.find_first_not_of(" \t", key_pos + yaw_key.size());
+        if (val_begin == std::string::npos) {
+            break;
+        }
+        size_t val_end = l.find_first_of(",}", val_begin);
+        if (val_end == std::string::npos) {
+            val_end = l.size();
+        }
+        l = l.substr(0, val_begin) + new_value + l.substr(val_end);
+        updated = true;
+        break;
+    }
+
+    if (!updated) {
+        // 行内定位失败（例如 yaw_deg 跨行书写）：整文件重写
+        try {
+            root["waypoints"][static_cast<std::size_t>(target_index)]["yaw_deg"] = angle_deg;
+        } catch (const YAML::Exception& e) {
+            if (error != nullptr) {
+                *error = std::string("failed to set yaw_deg: ") + e.what();
+            }
+            return false;
+        }
+        std::ofstream fallback_out(file_path, std::ios::trunc);
+        if (!fallback_out.is_open()) {
+            if (error != nullptr) {
+                *error = "cannot write file";
+            }
+            return false;
+        }
+        fallback_out << YAML::Dump(root) << "\n";
+        const bool fallback_ok = fallback_out.good();
+        fallback_out.close();
+        if (!fallback_ok && error != nullptr) {
+            *error = "write error while rewriting file";
+        }
+        return fallback_ok;
+    }
+
+    std::ofstream out(file_path, std::ios::trunc);
+    if (!out.is_open()) {
+        if (error != nullptr) {
+            *error = "cannot write file";
+        }
+        return false;
+    }
+    for (size_t i = 0; i < lines.size(); ++i) {
+        out << lines[i];
+        if (i + 1 < lines.size()) out << "\n";
+    }
+    if (has_trailing_newline && !lines.empty()) {
+        out << "\n";
+    }
+    out.close();
+    return out.good();
 }
 
 }
@@ -181,6 +388,12 @@ void HttpServer::SetupRoutes() {
     });
     server_->Post("/sendCommand", [this](const httplib::Request& req, httplib::Response& res) {
         HandleCommand(req, res);
+    });
+    server_->Get("/pointAngleSet", [this](const httplib::Request& req, httplib::Response& res) {
+        HandlePointAngleSet(req, res);
+    });
+    server_->Post("/pointAngleSet", [this](const httplib::Request& req, httplib::Response& res) {
+        HandlePointAngleSet(req, res);
     });
 }
 
@@ -345,6 +558,85 @@ void HttpServer::HandleCommand(const httplib::Request& req, httplib::Response& r
     const bool success = CallCommandService(command_mode);
 
     SendResult(res, success ? 1 : 2);
+}
+
+// 处理/pointAngleSet角度设置请求：修改指定航线中对应航点的 yaw_deg
+void HttpServer::HandlePointAngleSet(const httplib::Request& req, httplib::Response& res) {
+    int site_id = 0;
+    int device_id = 0;
+    int point_id = 0;
+    double angle_deg = 0.0;
+    std::string airline_key = FindParam(req, {"airlineKey"});
+
+    bool angle_ok = ParseDoubleValue(FindParam(req, {"angle"}), &angle_deg);
+    bool ok = ParseIntValue(FindParam(req, {"siteId", "siteld"}), &site_id) &&
+              ParseIntValue(FindParam(req, {"deviceId", "deviceld"}), &device_id) &&
+              ParseIntValue(FindParam(req, {"pointId", "pointid"}), &point_id) &&
+              angle_ok && !airline_key.empty() &&
+              site_id > 0 && device_id > 0 && point_id > 0;
+
+    if (!ok && !req.body.empty()) {
+        try {
+            nlohmann::json body = nlohmann::json::parse(req.body);
+            if (site_id <= 0) {
+                site_id = body.value("siteId", body.value("siteld", 0));
+            }
+            if (device_id <= 0) {
+                device_id = body.value("deviceId", body.value("deviceld", 0));
+            }
+            if (point_id <= 0) {
+                point_id = body.value("pointId", body.value("pointid", 0));
+            }
+            if (airline_key.empty()) {
+                airline_key = body.value("airlineKey", "");
+            }
+            if (!angle_ok && body.contains("angle") && body["angle"].is_number()) {
+                angle_deg = body["angle"].get<double>();
+                angle_ok = std::isfinite(angle_deg);
+            }
+            ok = (site_id > 0 && device_id > 0 && point_id > 0 &&
+                  !airline_key.empty() && angle_ok);
+        } catch (const std::exception&) {
+            ok = false;
+        }
+    }
+
+    if (!ok) {
+        ROS_WARN("Rejected /pointAngleSet request from %s:%d due to invalid parameters",
+                 req.remote_addr.c_str(),
+                 req.remote_port);
+        SendResult(res, 3);
+        return;
+    }
+
+    const std::string waypoint_pkg = ros::package::getPath("indooruav_waypoint");
+    const std::string waypoint_file = waypoint_pkg + "/waypoints/" + airline_key + ".yaml";
+    {
+        std::ifstream check(waypoint_file);
+        if (!check.is_open()) {
+            ROS_ERROR("Waypoint file not found for /pointAngleSet: %s", waypoint_file.c_str());
+            SendResult(res, 2);
+            return;
+        }
+    }
+
+    std::string error;
+    if (!UpdateWaypointYawDeg(waypoint_file, point_id, angle_deg, &error)) {
+        ROS_ERROR("Failed to set angle for airline=%s pointId=%d in %s: %s",
+                  airline_key.c_str(), point_id, waypoint_file.c_str(), error.c_str());
+        SendResult(res, 2);
+        return;
+    }
+
+    ROS_INFO("Received /pointAngleSet from %s:%d, siteId=%d, deviceId=%d, airlineKey=%s, pointId=%d, angle=%.2f",
+             req.remote_addr.c_str(),
+             req.remote_port,
+             site_id,
+             device_id,
+             airline_key.c_str(),
+             point_id,
+             angle_deg);
+    SendResult(res, 1);
 }
 
 // 根据commandMode调用对应的ROS服务

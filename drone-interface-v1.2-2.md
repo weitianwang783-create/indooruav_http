@@ -362,6 +362,11 @@ result示例：
 | { "result": [ { "waypointList": [ { "distance": 1, "waypointz": 1, "waypointy": 1, "waypointx": 1, "angle": 1 }, { "distance": 2, "waypointz": 2, "waypointy": 2, "waypointx": 2, "angle": 2 }, { "distance": 3, "waypointz": 3, "waypointy": 3, "waypointx": 3, "angle": 3 } ], "airlineKey": "AAAAAAAAA", "airlineMap": "AAAAAAAAA" } ], "resultCode": 1 } |
 | --- |
 
+
+
+
+
+
 # 无人机端接口
 
 ## 1.5、选择航线
@@ -407,4 +412,21 @@ http://ip:port/sendCommand?siteId=11&deviceId=1&commandMode=1
 返回值格式：
 
 | { "resultCode": 1 } |
+| --- |
+
+
+## 1.15、角度设置
+http://ip:port/pointAngleSet?siteld=11&deviceld=1&airlineKey=111&pointid=1&angle=22
+| 属性名 | 类型 | 描述 |
+| --- | --- | --- |
+| siteId | int | 站点ID，需可设置，默认11 |
+| deviceId | int | 设备ID，需可设置，默认1 |
+| airlineKey | String | 航线唯一标识 |
+| pointId| int | 航点唯一标识 |
+| angle| double | 角度，精度0.00 |
+返回值对象属性说明：
+| 属性名 | 类型 | 描述 |
+| --- | --- | --- |
+| resultCode | Integer | 请求结果:1 成功，2 失败，3 数据格式不正确 |
+返回值格式：| { "resultCode": 1 } |
 | --- |

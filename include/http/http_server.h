@@ -35,6 +35,7 @@ private:
 
 	void HandleAirlineInfo(const httplib::Request& req, httplib::Response& res);
 	void HandleCommand(const httplib::Request& req, httplib::Response& res);
+	void HandlePointAngleSet(const httplib::Request& req, httplib::Response& res);
 
 	void StateCallback(const std_msgs::String::ConstPtr& msg);
 	void LaunchNodesForTakeoff();
