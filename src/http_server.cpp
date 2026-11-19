@@ -119,12 +119,84 @@ bool ParseDoubleValue(const std::string& raw, double* value) {
     }
 }
 
-// 将航点文件中的第 point_id 个停留航点的 yaw_deg 修改为 angle_deg。
+// 将一行中 field_key（形如 "gimbal_pitch:"）对应的数值替换为 new_value
+bool ReplaceFieldValue(std::string& line, const std::string& field_key,
+                       const std::string& new_value) {
+    const size_t first_non_space = line.find_first_not_of(" \t");
+    if (first_non_space == std::string::npos || line[first_non_space] == '#') {
+        return false;
+    }
+    const size_t field_pos = line.find(field_key);
+    if (field_pos == std::string::npos) {
+        return false;
+    }
+    const size_t val_begin = line.find_first_not_of(" \t", field_pos + field_key.size());
+    if (val_begin == std::string::npos) {
+        return false;
+    }
+    size_t val_end = line.find_first_of(",}#", val_begin);
+    if (val_end == std::string::npos) {
+        val_end = line.size();
+    }
+    // 保留数值与注释之间的空白
+    while (val_end > val_begin && (line[val_end - 1] == ' ' || line[val_end - 1] == '\t')) {
+        --val_end;
+    }
+    line = line.substr(0, val_begin) + new_value + line.substr(val_end);
+    return true;
+}
+
+// 找到包含第 line_index 行的块式（或以 "- " 起始的多行）序列项的行范围 [start, end)
+bool FindSequenceEntryRange(const std::vector<std::string>& lines, size_t line_index,
+                            size_t* start, size_t* end) {
+    size_t dash = 0;
+    size_t dash_indent = 0;
+    bool found = false;
+    for (size_t i = line_index + 1; i-- > 0; ) {
+        const std::string& l = lines[i];
+        const size_t first = l.find_first_not_of(" \t");
+        if (first == std::string::npos || l[first] == '#') {
+            continue;
+        }
+        if (l[first] == '-' && first + 1 < l.size() &&
+            (l[first + 1] == ' ' || l[first + 1] == '\t')) {
+            dash = i;
+            dash_indent = first;
+            found = true;
+            break;
+        }
+        if (first == 0) {
+            break;  // 已到顶层键仍未找到序列项
+        }
+    }
+    if (!found) {
+        return false;
+    }
+
+    size_t stop = lines.size();
+    for (size_t i = dash + 1; i < lines.size(); ++i) {
+        const std::string& l = lines[i];
+        const size_t first = l.find_first_not_of(" \t");
+        if (first == std::string::npos || l[first] == '#') {
+            continue;
+        }
+        if (first <= dash_indent) {
+            stop = i;
+            break;
+        }
+    }
+    *start = dash;
+    *end = stop;
+    return true;
+}
+
+// 将航点文件中的第 point_id 个停留航点的云台俯仰角 gimbal_pitch 修改为 angle_deg。
 // point_id 与 http_client 上报给平台的 waypointList 编号保持一致：
 // 只统计 stop: true 的航点，按文件中的出现顺序从 1 开始编号。
-// 优先逐行改写，尽量保留录制文件的注释与排版；定位失败时退回整文件重写。
-bool UpdateWaypointYawDeg(const std::string& file_path, int point_id,
-                          double angle_deg, std::string* error) {
+// 优先逐行改写，尽量保留录制文件的注释与排版；航点没有 gimbal_pitch 时补写该字段；
+// 行内无法定位时退回整文件重写。
+bool UpdateWaypointGimbalPitch(const std::string& file_path, int point_id,
+                               double angle_deg, std::string* error) {
     if (error != nullptr) {
         error->clear();
     }
@@ -174,6 +246,19 @@ bool UpdateWaypointYawDeg(const std::string& file_path, int point_id,
         return false;
     }
 
+    bool target_flow = false;
+    bool field_exists = false;
+    try {
+        const YAML::Node target_node = waypoints[static_cast<std::size_t>(target_index)];
+        target_flow = (target_node.Style() == YAML::EmitterStyle::Flow);
+        field_exists = static_cast<bool>(target_node["gimbal_pitch"]);
+    } catch (const YAML::Exception& e) {
+        if (error != nullptr) {
+            *error = std::string("malformed target waypoint: ") + e.what();
+        }
+        return false;
+    }
+
     std::ifstream in(file_path);
     if (!in.is_open()) {
         if (error != nullptr) {
@@ -202,13 +287,15 @@ bool UpdateWaypointYawDeg(const std::string& file_path, int point_id,
     }
 
     const std::string yaw_key = "yaw_deg:";
+    const std::string field_key = "gimbal_pitch:";
     std::ostringstream value_stream;
     value_stream << std::fixed << std::setprecision(2) << angle_deg;
     const std::string new_value = value_stream.str();
 
     int occurrence = 0;
     bool updated = false;
-    for (auto& l : lines) {
+    for (size_t i = 0; i < lines.size(); ++i) {
+        std::string& l = lines[i];
         const size_t first_non_space = l.find_first_not_of(" \t");
         if (first_non_space == std::string::npos || l[first_non_space] == '#') {
             continue;  // 跳过空行与注释行
@@ -221,26 +308,56 @@ bool UpdateWaypointYawDeg(const std::string& file_path, int point_id,
             continue;
         }
 
-        const size_t val_begin = l.find_first_not_of(" \t", key_pos + yaw_key.size());
-        if (val_begin == std::string::npos) {
+        if (field_exists) {
+            // 字段可能与 yaw_deg 同行，也可能写在同一航点的后续行
+            if (ReplaceFieldValue(l, field_key, new_value)) {
+                updated = true;
+                break;
+            }
+            size_t entry_start = 0;
+            size_t entry_end = 0;
+            if (FindSequenceEntryRange(lines, i, &entry_start, &entry_end)) {
+                for (size_t j = entry_start; j < entry_end; ++j) {
+                    if (j != i && ReplaceFieldValue(lines[j], field_key, new_value)) {
+                        updated = true;
+                        break;
+                    }
+                }
+            }
+            break;  // 找不到则退回整文件重写
+        }
+
+        // 字段不存在：补写 gimbal_pitch，保持流式/块式原有排版
+        if (target_flow) {
+            const size_t brace = l.rfind('}');
+            if (brace == std::string::npos) {
+                break;
+            }
+            size_t insert_pos = brace;
+            while (insert_pos > 0 && (l[insert_pos - 1] == ' ' || l[insert_pos - 1] == '\t')) {
+                --insert_pos;
+            }
+            const bool has_comma = insert_pos > 0 && l[insert_pos - 1] == ',';
+            l.insert(insert_pos, (has_comma ? " " : ", ") + field_key + " " + new_value);
+            updated = true;
             break;
         }
-        size_t val_end = l.find_first_of(",}", val_begin);
-        if (val_end == std::string::npos) {
-            val_end = l.size();
-        }
-        l = l.substr(0, val_begin) + new_value + l.substr(val_end);
+
+        // 块式：在 yaw_deg 行后插入同列的新行
+        const std::string indent(key_pos, ' ');
+        lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(i) + 1,
+                     indent + field_key + " " + new_value);
         updated = true;
         break;
     }
 
     if (!updated) {
-        // 行内定位失败（例如 yaw_deg 跨行书写）：整文件重写
+        // 行内定位失败（例如字段跨行书写）：整文件重写
         try {
-            root["waypoints"][static_cast<std::size_t>(target_index)]["yaw_deg"] = angle_deg;
+            root["waypoints"][static_cast<std::size_t>(target_index)]["gimbal_pitch"] = angle_deg;
         } catch (const YAML::Exception& e) {
             if (error != nullptr) {
-                *error = std::string("failed to set yaw_deg: ") + e.what();
+                *error = std::string("failed to set gimbal_pitch: ") + e.what();
             }
             return false;
         }
@@ -560,7 +677,7 @@ void HttpServer::HandleCommand(const httplib::Request& req, httplib::Response& r
     SendResult(res, success ? 1 : 2);
 }
 
-// 处理/pointAngleSet角度设置请求：修改指定航线中对应航点的 yaw_deg
+// 处理/pointAngleSet角度设置请求：修改指定航线中对应航点的云台俯仰角 gimbal_pitch
 void HttpServer::HandlePointAngleSet(const httplib::Request& req, httplib::Response& res) {
     int site_id = 0;
     int device_id = 0;
@@ -621,14 +738,14 @@ void HttpServer::HandlePointAngleSet(const httplib::Request& req, httplib::Respo
     }
 
     std::string error;
-    if (!UpdateWaypointYawDeg(waypoint_file, point_id, angle_deg, &error)) {
-        ROS_ERROR("Failed to set angle for airline=%s pointId=%d in %s: %s",
+    if (!UpdateWaypointGimbalPitch(waypoint_file, point_id, angle_deg, &error)) {
+        ROS_ERROR("Failed to set gimbal pitch for airline=%s pointId=%d in %s: %s",
                   airline_key.c_str(), point_id, waypoint_file.c_str(), error.c_str());
         SendResult(res, 2);
         return;
     }
 
-    ROS_INFO("Received /pointAngleSet from %s:%d, siteId=%d, deviceId=%d, airlineKey=%s, pointId=%d, angle=%.2f",
+    ROS_INFO("Received /pointAngleSet from %s:%d, siteId=%d, deviceId=%d, airlineKey=%s, pointId=%d, gimbal_pitch=%.2f",
              req.remote_addr.c_str(),
              req.remote_port,
              site_id,
